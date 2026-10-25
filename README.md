@@ -8,7 +8,11 @@ It worked pretty well, but I don't like the elo system. It's not a good fit for 
 
 But student problem matching is still an area of active research, and there is no proven "best" way to do it, especially when you lack data or are bootstrapping a new system like `code-swipe`.
 
-Furthermore, it doesn't appropriately account for languages' surrounding ecosystem. There's more to python, javascript, java and rust than what comes with the language, but the system doesn't have a good way of gradually introducing those concepts over time yet.
+Furthermore, it doesn't appropriately account for languages' surrounding ecosystem. There's more to python, javascript, java and rust than what comes with the language, but the system doesn't have a good way of gradually introducing those concepts over time yet. 
+
+A better version might allow students to provide areas of interest and gradually introduce related dependencies over time, like `pandas`, `numpy`, `cuda`, etc, if they are introduced in machine learning, as an example.
+
+There's also a more nebulous question about what it means for a student to have gained what they wanted from the platform. I don't have a great solution for having the platform say "you have learned what you need to learn."
 
 ## Demo
 
