@@ -1,0 +1,116 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Standard Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validate a user profile
+    function isValidUserProgress(data) {
+      return data.keys().hasAll(['userId', 'email'])
+        && data.userId is string
+        && data.email is string;
+    }
+
+    // Validate an attempt
+    function isValidAttempt(data) {
+      return data.keys().hasAll(['id', 'funcName', 'code', 'is_correct', 'swipedType', 'userGuessedCorrectly'])
+        && data.id is string
+        && data.funcName is string
+        && data.code is string
+        && data.is_correct is bool
+        && data.swipedType is string
+        && data.userGuessedCorrectly is bool;
+    }
+
+    // Validate an srs card
+    function isValidSrsCard(data) {
+      return data.keys().hasAll(['id', 'funcName', 'docstring', 'language', 'errorType', 'code', 'is_correct', 'explanation', 'availableAt'])
+        && data.id is string
+        && data.funcName is string
+        && data.docstring is string
+        && data.language is string
+        && data.errorType is string
+        && data.code is string
+        && data.is_correct is bool
+        && data.explanation is string
+        && data.availableAt is int;
+    }
+
+    // Validate global question
+    function isValidQuestion(data) {
+      return data.keys().hasAll(['id', 'text', 'answer', 'language', 'category', 'current_elo', 'created_at'])
+        && data.id is string
+        && data.text is string
+        && data.answer is string
+        && data.language is string
+        && data.category is string
+        && (data.current_elo is int || data.current_elo is float)
+        && data.created_at is string;
+    }
+
+    // Validate a user-specific fast SRS lookup attempt
+    function isValidUserAttempt(data) {
+      return data.keys().hasAll(['timestamp', 'was_correct', 'next_srs_review_date'])
+        && data.timestamp is string
+        && data.was_correct is bool
+        && data.next_srs_review_date is int;
+    }
+
+    // Global rated AI generated questions collection
+    match /questions/{questionId} {
+      allow get: if isSignedIn() && isValidId(questionId);
+      allow list: if isSignedIn();
+      // On creation, must validate shape
+      allow create: if isSignedIn() && isValidId(questionId) && isValidQuestion(request.resource.data);
+      // On update (e.g. updating Elo), must match valid question parameters or we can allow Elo updates if verified
+      allow update: if isSignedIn() && isValidId(questionId) && isValidQuestion(request.resource.data);
+      allow delete: if false; // Persistent global bank
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) && isValidId(userId);
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUserProgress(request.resource.data);
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUserProgress(request.resource.data);
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      match /attempts/{questionId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(questionId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create, update: if isOwner(userId) && isValidId(userId) && isValidId(questionId) && isValidUserAttempt(request.resource.data);
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(questionId);
+      }
+
+      match /history/{attemptId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(attemptId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(attemptId) && isValidAttempt(request.resource.data);
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(attemptId) && isValidAttempt(request.resource.data);
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(attemptId);
+      }
+
+      match /srsQueue/{cardId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(cardId);
+        allow list: if isOwner(userId) && isValidId(userId);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(cardId) && isValidSrsCard(request.resource.data);
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(cardId) && isValidSrsCard(request.resource.data);
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(cardId);
+      }
+    }
+  }
+}

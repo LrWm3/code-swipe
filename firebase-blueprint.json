@@ -1,0 +1,194 @@
+{
+  "entities": {
+    "UserProgress": {
+      "title": "UserProgress",
+      "description": "User profile with their daily goals, settings, and skills matrix.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The unique identifier of the user (Firebase Auth UID)."
+        },
+        "email": {
+          "type": "string",
+          "description": "The email of the user."
+        },
+        "language": {
+          "type": "string",
+          "description": "The current selected target programming language."
+        },
+        "errorTypes": {
+          "type": "array",
+          "description": "Array of active bug/error focus categories."
+        },
+        "skillsMatrix": {
+          "type": "object",
+          "description": "A map of language-to-errortypes performance and level analytics."
+        },
+        "dailyGoal": {
+          "type": "object",
+          "description": "Current day's correct answer tracker."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the profile was last synchronized."
+        }
+      },
+      "required": ["userId", "email"]
+    },
+    "Attempt": {
+      "title": "Attempt",
+      "description": "A record of an attempted card answer by a user.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The duplicate/variant card ID."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The UID who answered this card."
+        },
+        "funcName": {
+          "type": "string",
+          "description": "Name of the target function."
+        },
+        "docstring": {
+          "type": "string",
+          "description": "The function description."
+        },
+        "language": {
+          "type": "string",
+          "description": "The programming language used."
+        },
+        "errorType": {
+          "type": "string",
+          "description": "Type of bug focus (e.g. Logic, Security)."
+        },
+        "code": {
+          "type": "string",
+          "description": "The actual displayed code snippet."
+        },
+        "is_correct": {
+          "type": "boolean",
+          "description": "Whether the code snippet is correct (true) or buggy (false)."
+        },
+        "explanation": {
+          "type": "string",
+          "description": "Detailed explanation of why the code is correct or buggy."
+        },
+        "swipedType": {
+          "type": "string",
+          "description": "What the user swiped: 'left' (buggy), 'right' (correct), or 'unsure'."
+        },
+        "userGuessedCorrectly": {
+          "type": "boolean",
+          "description": "Whether the user guessed correctly (swiped right on correct or left on buggy)."
+        },
+        "timeTakenMs": {
+          "type": "integer",
+          "description": "Millis taken to answer."
+        },
+        "answeredAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of completion."
+        }
+      },
+      "required": ["id", "userId", "funcName", "code", "is_correct", "swipedType", "userGuessedCorrectly"]
+    },
+    "SrsCard": {
+      "title": "SrsCard",
+      "description": "A card stored in the spaced repetition system queue.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Card ID."
+        },
+        "funcName": {
+          "type": "string",
+          "description": "Function name."
+        },
+        "docstring": {
+          "type": "string",
+          "description": "Description of function."
+        },
+        "language": {
+          "type": "string",
+          "description": "Programming language."
+        },
+        "errorType": {
+          "type": "string",
+          "description": "Bug type focus."
+        },
+        "code": {
+          "type": "string",
+          "description": "The code block."
+        },
+        "is_correct": {
+          "type": "boolean",
+          "description": "Is this correct or buggy."
+        },
+        "explanation": {
+          "type": "string",
+          "description": "Detailed explanation."
+        },
+        "availableAt": {
+          "type": "integer",
+          "description": "Epoch timestamp in ms when card becomes available for review."
+        }
+      },
+      "required": ["id", "funcName", "docstring", "language", "errorType", "code", "is_correct", "explanation", "availableAt"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "A global generated question stored in the shared pool.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "answer": { "type": "string" },
+        "language": { "type": "string" },
+        "category": { "type": "string" },
+        "current_elo": { "type": "integer" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "text", "answer", "language", "category", "current_elo", "created_at"]
+    },
+    "UserAttempt": {
+      "title": "UserAttempt",
+      "description": "A direct lookup of a user's answer and state on a global question.",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "string" },
+        "was_correct": { "type": "boolean" },
+        "next_srs_review_date": { "type": "integer" }
+      },
+      "required": ["timestamp", "was_correct", "next_srs_review_date"]
+    }
+  },
+  "firestore": {
+    "/questions/{questionId}": {
+      "schema": "Question",
+      "description": "Global bank of shared, rated AI-generated problems."
+    },
+    "/users/{userId}": {
+      "schema": "UserProgress",
+      "description": "Sync of user settings, goals, and learning grid matrix."
+    },
+    "/users/{userId}/history/{attemptId}": {
+      "schema": "Attempt",
+      "description": "Historically swiped cards so user can inspect and study."
+    },
+    "/users/{userId}/srsQueue/{cardId}": {
+      "schema": "SrsCard",
+      "description": "Queue for spaced repetition challenges."
+    },
+    "/users/{userId}/attempts/{questionId}": {
+      "schema": "UserAttempt",
+      "description": "Direct attempts for cache logic and SRS."
+    }
+  }
+}
