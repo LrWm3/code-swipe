@@ -7,24 +7,32 @@ import {
   Flame, 
   ChevronRight, 
   LogOut, 
-  Play, 
   CheckCircle2, 
   HelpCircle, 
   XCircle,
   CheckCircle,
-  User as UserIcon, 
-  RotateCcw, 
   Sparkles,
   Award,
   Calendar,
   AlertTriangle,
   Lightbulb,
-  ChevronDown,
   Clock
 } from "lucide-react";
-import hljs from "highlight.js";
+import hljs from "highlight.js/lib/core";
+import python from "highlight.js/lib/languages/python";
+import javascript from "highlight.js/lib/languages/javascript";
+import typescript from "highlight.js/lib/languages/typescript";
+import rust from "highlight.js/lib/languages/rust";
+import java from "highlight.js/lib/languages/java";
+import kotlin from "highlight.js/lib/languages/kotlin";
+import c from "highlight.js/lib/languages/c";
+import cpp from "highlight.js/lib/languages/cpp";
+import csharp from "highlight.js/lib/languages/csharp";
+
 import "highlight.js/styles/vs2015.css";
 import { getOfflineCards } from "./offlineCards";
+import { TAG_CATEGORIES, TAG_CATEGORIES_REVERSE, LANGUAGE_STYLE_SUPPORT } from "./training";
+import type { Card } from "./types";
 
 // Firebase Imports
 import { initializeApp } from "firebase/app";
@@ -45,32 +53,19 @@ import {
   getDocs, 
   query, 
   where,
-  orderBy, 
-  limit, 
-  getDocFromServer,
-  addDoc,
   deleteDoc
 } from "firebase/firestore";
 import firebaseConfig from "../firebase-applet-config.json";
+
+for (const [name, grammar] of Object.entries({ python, javascript, typescript, rust, java, kotlin, c, cpp, csharp })) {
+  hljs.registerLanguage(name, grammar);
+}
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth();
 
-// Verification Connection to Firestore according to skill checklist
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, "test", "connection"));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("the client is offline")) {
-      console.error("Please check your Firebase configuration. Client is offline.");
-    }
-  }
-}
-testConnection();
-
-// Conforming Error Handling according to skill Checklist
 enum OperationType {
   CREATE = "create",
   UPDATE = "update",
@@ -94,7 +89,7 @@ interface FirestoreErrorInfo {
 
 function safeJsonStringify(obj: any): string {
   const seen = new WeakSet();
-  return JSON.stringify(obj, (key, value) => {
+  return JSON.stringify(obj, (_key, value) => {
     if (typeof value === "object" && value !== null) {
       if (seen.has(value)) {
         return "[Circular]";
@@ -127,123 +122,6 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   console.error("Firestore error logged: ", safeJsonStringify(errInfo));
   throw new Error(safeJsonStringify(errInfo));
 }
-
-export const TAG_CATEGORIES: Record<string, string> = {
-  // Logic
-  "null-pointer": "Logic",
-  "boundary-condition": "Logic",
-  "index-error": "Logic",
-  "off-by-one": "Logic",
-  "infinite-loop": "Logic",
-  "type-mismatch": "Logic",
-  "unhandled-exception": "Logic",
-  "floating-point-error": "Logic",
-  "unintended-mutation": "Logic",
-  "incorrect-implementation": "Logic",
-  // Performance
-  "unnecessary-copy": "Performance",
-  "quadratic-loop": "Performance",
-  "memory-leak": "Performance",
-  "inefficient-lookup": "Performance",
-  "cache-miss": "Performance",
-  "race-condition": "Performance",
-  "deadlock": "Performance",
-  "thread-starvation": "Performance",
-  "state-desync": "Performance",
-  "blocking-event-loop": "Performance",
-  "orphaned-promise": "Performance",
-  "database-n-plus-one": "Performance",
-  "blocking-io": "Performance",
-  "excessive-network-calls": "Performance",
-  "connection-pool-exhaustion": "Performance",
-  // Security
-  "sql-injection": "Security",
-  "xss": "Security",
-  "buffer-overflow": "Security",
-  "broken-auth": "Security",
-  "path-traversal": "Security",
-  "hardcoded-secrets": "Security",
-  "csrf": "Security",
-  "insecure-deserialization": "Security",
-  "ssrf": "Security",
-  "weak-crypto": "Security",
-  "privilege-escalation": "Security",
-  "cors-misconfiguration": "Security",
-  // Architecture
-  "circular-dependency": "Architecture",
-  "tight-coupling": "Architecture",
-  "improper-abstraction": "Architecture",
-  "god-object": "Architecture",
-  "dead-code": "Architecture",
-  "violation-of-dry": "Architecture",
-  "magic-numbers": "Architecture",
-  "solid-violation": "Architecture",
-  "leaky-abstraction": "Architecture",
-  "feature-envy": "Architecture"
-};
-
-export const TAG_CATEGORIES_REVERSE: Record<string, string[]> = {
-  "Logic": [
-    "null-pointer", "boundary-condition", "index-error", "off-by-one", 
-    "infinite-loop", "type-mismatch", "unhandled-exception", 
-    "floating-point-error", "unintended-mutation", "incorrect-implementation"
-  ],
-  "Performance": [
-    "unnecessary-copy", "quadratic-loop", "memory-leak", "inefficient-lookup", 
-    "cache-miss", "race-condition", "deadlock", "thread-starvation", "state-desync", 
-    "blocking-event-loop", "orphaned-promise", "database-n-plus-one", "blocking-io", 
-    "excessive-network-calls", "connection-pool-exhaustion"
-  ],
-  "Security": [
-    "sql-injection", "xss", "buffer-overflow", "broken-auth", 
-    "path-traversal", "hardcoded-secrets", "csrf", "insecure-deserialization", 
-    "ssrf", "weak-crypto", "privilege-escalation", "cors-misconfiguration"
-  ],
-  "Architecture": [
-    "circular-dependency", "tight-coupling", "improper-abstraction", 
-    "god-object", "dead-code", "violation-of-dry", "magic-numbers", 
-    "solid-violation", "leaky-abstraction", "feature-envy"
-  ]
-};
-
-export const LANGUAGE_STYLE_SUPPORT: Record<string, { iteration: string[], conditional: string[] }> = {
-  "Python": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching", "pattern-matching"]
-  },
-  "JavaScript": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching"]
-  },
-  "Rust": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching", "pattern-matching"]
-  },
-  "Java": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching", "pattern-matching"]
-  },
-  "Kotlin": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching", "pattern-matching"]
-  },
-  "Deno": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching"]
-  },
-  "C": {
-    iteration: ["imperative", "recursive"],
-    conditional: ["imperative-branching"]
-  },
-  "C++": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching"]
-  },
-  "C#": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching", "pattern-matching"]
-  }
-};
 
 // Language mapper helper
 const getLanguageTag = (langName: string) => {
@@ -390,24 +268,6 @@ function HighlightedCode({
   );
 }
 
-// Types & Classes
-export interface Card {
-  id: string;
-  funcName: string;
-  docstring: string;
-  language: string;
-  errorType: string;
-  code: string;
-  is_correct: boolean;
-  explanation: string;
-  availableAt?: number;
-  baseElo?: number;
-  tags?: string[];
-  iterationStyle?: string;
-  conditionalStyle?: string;
-  idiomStyle?: string;
-}
-
 interface Attempt {
   id: string;
   funcName: string;
@@ -494,9 +354,6 @@ export default function App() {
   // Retry countdown ticker for API rate limits
   useEffect(() => {
     if (!synthesisError || !synthesisError.isRateLimit || synthesisError.retryAfterSeconds <= 0) {
-      if (synthesisError && synthesisError.retryAfterSeconds <= 0) {
-        setSynthesisError(null);
-      }
       return;
     }
 
@@ -518,10 +375,18 @@ export default function App() {
   }, [synthesisError]);
 
   const handleLoadOfflineCards = useCallback(() => {
+    const offline = getOfflineCards(language, errorTypes);
+    if (offline.length === 0) {
+      setSynthesisError({
+        message: `No offline cards are available for ${language}. Retry generation or choose another language in Settings.`,
+        isRateLimit: false,
+        retryAfterSeconds: 0,
+      });
+      return;
+    }
     setSynthesisError(null);
     setIsGenerating(true);
     try {
-      const offline = getOfflineCards(language, errorTypes);
       const cardsWithUniqueIds = offline.map((c) => {
         const errorCategory = c.errorType;
         const tagsForCategory = TAG_CATEGORIES_REVERSE[errorCategory] || ["boundary-condition"];
@@ -978,14 +843,14 @@ export default function App() {
 
       const resJson = await response.json();
       if (!response.ok || !resJson.success) {
-        const isRateLimit = resJson.isRateLimit || response.status === 429 || String(resJson.error).includes("429") || String(resJson.error).includes("RESOURCE_EXHAUSTED") || String(resJson.error).includes("quota");
-        const isHighDemand = resJson.isHighDemand || response.status === 503 || String(resJson.error).includes("503") || String(resJson.error).includes("UNAVAILABLE") || String(resJson.error).includes("demand") || String(resJson.error).includes("temporary");
+        const isRateLimit = resJson.isRateLimit ?? response.status === 429;
+        const isHighDemand = resJson.isHighDemand ?? response.status === 503;
         
         const errorDetail = {
           message: resJson.error || "Gemini card synthesis failed",
           isRateLimit: isRateLimit || isHighDemand,
           isHighDemand,
-          retryAfterSeconds: resJson.retryAfterSeconds || (isHighDemand ? 30 : 60)
+          retryAfterSeconds: resJson.retryAfterSeconds ?? (isHighDemand ? 30 : 60)
         };
         setSynthesisError(errorDetail);
         throw new Error(errorDetail.message);
@@ -1056,6 +921,9 @@ export default function App() {
       if (activeDeckAdditions.length === 0) {
         console.warn("Gemini synthesized successfully but returned 0 valid card variants. Gracefully falling back to loading offline cards.");
         const offline = getOfflineCards(targetLang, activeErrs);
+        if (offline.length === 0) {
+          throw new Error(`No usable cards were returned for ${targetLang}. Retry generation or choose another language in Settings.`);
+        }
         const fallbackCards = offline.map((c) => {
           const errorCategory = c.errorType;
           const tagsForCategory = TAG_CATEGORIES_REVERSE[errorCategory] || ["boundary-condition"];
@@ -1104,18 +972,20 @@ export default function App() {
 
   // Card deck triggering
   useEffect(() => {
+    if (authLoading) return;
     if (user && (!deck || deck.length === 0) && !isGenerating && view === "swipe") {
       // If there's an active error and we have 0 cards left, trigger automatic offline cards loading as a transparent, friendly fallback
       if (synthesisError) {
-        console.warn("SAFEGUARD: Empty deck and synthesis error active. Automatically activating offline practice fallback...");
-        handleLoadOfflineCards();
+        if (getOfflineCards(language, errorTypes).length > 0) {
+          handleLoadOfflineCards();
+        }
       } else {
         generateCards();
       }
     } else if (user && deck && deck.length === 1 && !isGenerating && !synthesisError && view === "swipe") {
       generateCards();
     }
-  }, [deck, isGenerating, view, user, generateCards, synthesisError, handleLoadOfflineCards]);
+  }, [authLoading, deck, isGenerating, view, user, generateCards, synthesisError, handleLoadOfflineCards, language, errorTypes]);
 
   // Handle answers and update telemetry matrix
   const handleAction = async (actionType: "left" | "right" | "unsure", timeTakenMs: number) => {

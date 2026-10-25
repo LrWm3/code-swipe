@@ -1,51 +1,31 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { TAG_CATEGORIES_REVERSE as STANDARD_TAGS, LANGUAGE_STYLE_SUPPORT } from "./src/training";
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
 
-// Initialize GoogleGenAI client lazy-loaded or at start
 const apiKey = process.env.GEMINI_API_KEY;
-const ai = new GoogleGenAI({
-  apiKey: apiKey,
-  httpOptions: {
-    headers: {
-      "User-Agent": "aistudio-build",
-    },
-  },
-});
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 app.use(express.json());
-
-// API: Generate Cards
-const STANDARD_TAGS = {
-  "Logic": [
-    "null-pointer", "boundary-condition", "index-error", "off-by-one", 
-    "infinite-loop", "type-mismatch", "unhandled-exception", 
-    "floating-point-error", "unintended-mutation", "incorrect-implementation"
-  ],
-  "Performance": [
-    "unnecessary-copy", "quadratic-loop", "memory-leak", "inefficient-lookup", 
-    "cache-miss", "race-condition", "deadlock", "thread-starvation", "state-desync", 
-    "blocking-event-loop", "orphaned-promise", "database-n-plus-one", "blocking-io", 
-    "excessive-network-calls", "connection-pool-exhaustion"
-  ],
-  "Security": [
-    "sql-injection", "xss", "buffer-overflow", "broken-auth", 
-    "path-traversal", "hardcoded-secrets", "csrf", "insecure-deserialization", 
-    "ssrf", "weak-crypto", "privilege-escalation", "cors-misconfiguration"
-  ],
-  "Architecture": [
-    "circular-dependency", "tight-coupling", "improper-abstraction", 
-    "god-object", "dead-code", "violation-of-dry", "magic-numbers", 
-    "solid-violation", "leaky-abstraction", "feature-envy"
-  ]
-};
+app.use("/api", (_req, res, next) => {
+  if (!ai) {
+    res.status(503).json({
+      success: false,
+      error: "Set GEMINI_API_KEY to enable card generation and the AI tutor.",
+      isRateLimit: false,
+      isHighDemand: false,
+      retryAfterSeconds: 0,
+    });
+    return;
+  }
+  next();
+});
 
 function chooseCategory(unlocked: string[], rounds: Record<string, number>): string {
   const list = unlocked && unlocked.length > 0 ? unlocked : ["Logic"];
@@ -70,45 +50,6 @@ function chooseCategory(unlocked: string[], rounds: Record<string, number>): str
   
   return list[Math.floor(Math.random() * list.length)];
 }
-
-const LANGUAGE_STYLE_SUPPORT: Record<string, { iteration: string[], conditional: string[] }> = {
-  "Python": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching", "pattern-matching"]
-  },
-  "JavaScript": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching"]
-  },
-  "Rust": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching", "pattern-matching"]
-  },
-  "Java": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching", "pattern-matching"]
-  },
-  "Kotlin": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching", "pattern-matching"]
-  },
-  "Deno": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching"]
-  },
-  "C": {
-    iteration: ["imperative", "recursive"],
-    conditional: ["imperative-branching"]
-  },
-  "C++": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching"]
-  },
-  "C#": {
-    iteration: ["imperative", "for-each", "functional-pipeline", "fold-reduce", "recursive"],
-    conditional: ["imperative-branching", "pattern-matching"]
-  }
-};
 
 function getInterpolatedWeight(elo: number, Z: number, H: number, F: number, maxWeight: number): number {
   if (elo <= Z) return 0;
@@ -317,7 +258,7 @@ CRITICAL RULES:
       }
     };
 
-    const response = await ai.models.generateContent({
+    const response = await ai!.models.generateContent({
       model: "gemini-3.5-flash",
       contents: prompt,
       config: {
@@ -397,7 +338,7 @@ Tutor Explanation provided so far:
 
 Help the student understand the concepts, what traps to look out for, and how to write elegant, secure, and performant code next time. Use clean visual formatting with markdown.`;
 
-    const response = await ai.models.generateContent({
+    const response = await ai!.models.generateContent({
       model: "gemini-3.5-flash",
       contents: prompt,
       config: {
@@ -437,22 +378,30 @@ Help the student understand the concepts, what traps to look out for, and how to
 // Handle serving the frontend
 async function main() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = path.join(import.meta.dirname, "client");
     app.use(express.static(distPath));
     // Serve index.html for undefined routes in React SPA
-    app.get("*", (req, res) => {
+    app.get("*", (_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    const address = server.address();
+    if (address && typeof address !== "string") {
+      console.log(`Server running on http://0.0.0.0:${address.port}`);
+    }
+  });
+  server.on("error", (error) => {
+    console.error("Failed to start server:", error);
+    process.exit(1);
   });
 }
 

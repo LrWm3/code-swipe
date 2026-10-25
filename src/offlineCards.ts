@@ -1,25 +1,23 @@
 // Curated high-quality fallback coding cards for offline study and when Gemini limits are hit.
-import { Card } from "./App";
+import type { Card } from "./types";
 
 export const OFFLINE_CARDS: Card[] = [
   // --- PYTHON ---
   {
     id: "off_py_logic_1",
     funcName: "calculate_bonus",
-    docstring: "Computes employee performance bonuses. Bonuses are 10% of base salary if rating is above 4.5, otherwise 5%. But buggy implementation returns wrong calculation.",
+    docstring: "Computes employee performance bonuses: 10% of base salary if the rating is above 4.5, otherwise 5%.",
     language: "Python",
     errorType: "Logic",
     code: `def calculate_bonus(salary: float, rating: float) -> float:
-    # BUG: Incorrect conditional logic using assignments or misplaced operators
-    if rating >= 4.5:
+    if rating > 4.5:
         bonus_pct = 0.10
     else:
         bonus_pct = 0.05
     
-    # Bug here: assigning instead of comparison in some logic, or here:
-    return salary + (salary * bonus_pct)`,
+    return salary * bonus_pct`,
     is_correct: true,
-    explanation: "This implementation correctly calculates the bonus based on rating, adding the percentage multiplier to the base salary."
+    explanation: "The function returns only the bonus amount, using 10% above a 4.5 rating and 5% otherwise."
   },
   {
     id: "off_py_logic_1_bug",
@@ -249,18 +247,7 @@ void aggregateMetricPayload(std::vector<std::string> rawMetrics) {
 export function getOfflineCards(language: string, errorTypes: string[]): Card[] {
   const target = (language || "").toLowerCase();
   
-  // Filter cards matching the language and errorTypes list
-  const filtered = OFFLINE_CARDS.filter(
-    (c) => c && c.language && c.language.toLowerCase() === target && errorTypes.includes(c.errorType)
-  );
-  if (filtered.length > 0) {
-    return filtered;
-  }
-  // Try filtering just by language
-  const langFiltered = OFFLINE_CARDS.filter((c) => c && c.language && c.language.toLowerCase() === target);
-  if (langFiltered.length > 0) {
-    return langFiltered;
-  }
-  // Strictly filter by language for the default pool rather than returning all languages
-  return OFFLINE_CARDS.filter((c) => c && c.language && c.language.toLowerCase() === target);
+  const languageCards = OFFLINE_CARDS.filter((card) => card.language.toLowerCase() === target);
+  const matchingCards = languageCards.filter((card) => errorTypes.includes(card.errorType));
+  return matchingCards.length > 0 ? matchingCards : languageCards;
 }
