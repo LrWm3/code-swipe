@@ -1,6 +1,10 @@
 # Code Swipe
 
-Quick code-review practice, swipe style. Spot bugs, learn from explanations, and build up your skills as the questions get harder. Firebase keeps your progress in sync, and Gemini can make fresh challenges.
+Learn to read code and identify if it was implemented correctly or not.
+
+This was a small project I made to explore this as an alternative idea for testing coding knowledge based on the ideas from [Using Erroneous Examples to Improve Mathematics Learning with a Web-Based Tutoring System (Adams et al., 2014).](https://www.cs.cmu.edu/~bmclaren/pubs/AdamsEtAl-UsingErrExToImproveMathLearningWithWebTutoringSys-CHB2014.pdf)
+
+It worked pretty well, but I don't like the elo system. It's not a good fit for this kind of system. There's been a lot of research into different student problem matching systems but its still an area of active research.
 
 ![Code Swipe gameplay: swiping code cards and reviewing bug explanations](docs/assets/code-swipe-gameplay.gif)
 
