@@ -1,10 +1,12 @@
 # Code Swipe
 
-Learn to read code and identify if it was implemented correctly or not.
+Learn to read code and identify if it was implemented correctly or not. Over time problems become harder and attempt to match appropriate to your level of knowledge. 
 
 This was a small project I made to explore this as an alternative idea for testing coding knowledge based on the ideas from [Using Erroneous Examples to Improve Mathematics Learning with a Web-Based Tutoring System (Adams et al., 2014).](https://www.cs.cmu.edu/~bmclaren/pubs/AdamsEtAl-UsingErrExToImproveMathLearningWithWebTutoringSys-CHB2014.pdf)
 
 It worked pretty well, but I don't like the elo system. It's not a good fit for this kind of system. There's been a lot of research into different student problem matching systems but its still an area of active research.
+
+Furthermore, it doesn't appropriately account for languages' surrounding ecosystem. There's more to python, javascript, java and rust than what comes with the language, but the system doesn't have a good way of gradually introducing those concepts over time yet.
 
 ![Code Swipe gameplay: swiping code cards and reviewing bug explanations](docs/assets/code-swipe-gameplay.gif)
 
