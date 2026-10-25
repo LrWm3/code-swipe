@@ -1,11 +1,9 @@
 # Code Swipe
 
-Quick code-review practice, swipe style. Spot bugs, learn from explanations, and build up your skills as the questions get harder. Gemini makes new challenges; Firebase keeps your progress in sync.
+Quick code-review practice, swipe style. Spot bugs, learn from explanations, and build up your skills as the questions get harder. Firebase keeps your progress in sync, and Gemini can make fresh challenges.
 
-To run locally, use Node 22+, run `npm ci`, copy `.env.example` to `.env`, add your Gemini API key, then run `npm run dev`. Open `http://localhost:3000`.
+With Node 22+, run `npm ci` and `npm run dev`, then open `http://localhost:3000`.
 
-Google sign-in and saved progress need a Firebase project: update `firebase-applet-config.json`, enable Google sign-in, authorize your app's domain, and deploy `firestore.rules` to the configured Firestore database. Built-in practice cards cover Python, JavaScript, Rust, and C++ when AI is unavailable.
-
-`npm run lint` checks types. `npm test` builds and runs regression checks. For a production build, run `npm run build` and `npm start`.
+Sign-in and saved progress need working Firebase configuration in `firebase-applet-config.json`. Copy `.env.example` to `.env` and add a Gemini key for AI features; built-in practice cards cover a few languages without one.
 
 Created with Google App Studio
