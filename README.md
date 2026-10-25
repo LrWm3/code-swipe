@@ -4,7 +4,9 @@ Learn to read code and identify if it was implemented correctly or not. Over tim
 
 This was a small project I made to explore this as an alternative idea for testing coding knowledge based on the ideas from [Using Erroneous Examples to Improve Mathematics Learning with a Web-Based Tutoring System (Adams et al., 2014).](https://www.cs.cmu.edu/~bmclaren/pubs/AdamsEtAl-UsingErrExToImproveMathLearningWithWebTutoringSys-CHB2014.pdf)
 
-It worked pretty well, but I don't like the elo system. It's not a good fit for this kind of system. There's been a lot of research into different student problem matching systems but its still an area of active research.
+It worked pretty well, but I don't like the elo system. It's not a good fit for this kind of system. There's been a lot of research into different student problem matching systems and elo is widely regarded as insufficient even for well defined concepts. 
+
+But student problem matching is still an area of active research, and there is no proven "best" way to do it, especially when you lack data or are bootstrapping a new system like `code-swipe`.
 
 Furthermore, it doesn't appropriately account for languages' surrounding ecosystem. There's more to python, javascript, java and rust than what comes with the language, but the system doesn't have a good way of gradually introducing those concepts over time yet.
 
