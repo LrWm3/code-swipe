@@ -8,6 +8,8 @@ It worked pretty well, but I don't like the elo system. It's not a good fit for 
 
 Furthermore, it doesn't appropriately account for languages' surrounding ecosystem. There's more to python, javascript, java and rust than what comes with the language, but the system doesn't have a good way of gradually introducing those concepts over time yet.
 
+## Demo
+
 ![Code Swipe gameplay: swiping code cards and reviewing bug explanations](docs/assets/code-swipe-gameplay.gif)
 
 With Node 22+, run `npm ci` and `npm run dev`, then open `http://localhost:3000`.
