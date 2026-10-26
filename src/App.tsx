@@ -155,12 +155,12 @@ function CurriculumDetails({ curriculum, reviews, lessonReviews }: { curriculum:
     const review = reviews.find((item) => item.attempt.id === id);
     return <li key={id}>{review ? <>{review.question.title} — {resultLabel(review.attempt.correct)}{review.attempt.flagged ? ' (excluded)' : ''}</> : <code>{id}</code>}</li>;
   });
-  return <details className="plain-details notebook-section"><summary>Curriculum planning details</summary>
+  return <details id="lesson-curriculum" tabIndex={-1} className="plain-details notebook-section"><summary>Curriculum planning details</summary>
     <p className="fine-print">Intent was saved before this lesson. Observations below concern earlier answers; interpretations remain tentative.</p>
     <p><span className="small-label">Why this mix</span>{curriculum.mixRationale}</p>
     <p><span className="small-label">Why this sequence</span>{curriculum.sequenceRationale}</p>
-    {curriculum.frontier.length > 0 && <div className="notebook-section"><h3>Frontier decisions</h3><ul>{curriculum.frontier.map((item, index) => <li key={index}><strong>{conceptName(item.conceptId)} · {item.decision}</strong> — {item.reason}</li>)}</ul></div>}
-    {curriculum.conceptUpdates.length > 0 && <div className="notebook-section"><h3>Concept notes before this lesson</h3>{curriculum.conceptUpdates.map((concept) => <details className="plain-details" key={concept.id}><summary>{concept.name} · {concept.familiarity}</summary>
+    {curriculum.frontier.length > 0 && <div id="lesson-frontier" tabIndex={-1} className="notebook-section"><h3>Frontier decisions</h3><ul>{curriculum.frontier.map((item, index) => <li key={index}><strong>{conceptName(item.conceptId)} · {item.decision}</strong> — {item.reason}</li>)}</ul></div>}
+    {curriculum.conceptUpdates.length > 0 && <div id="lesson-concepts" tabIndex={-1} className="notebook-section"><h3>Concept notes before this lesson</h3>{curriculum.conceptUpdates.map((concept) => <details className="plain-details" key={concept.id}><summary>{concept.name} · {concept.familiarity}</summary>
       <p>{concept.description}</p>
       <p><span className="small-label">Uncertainty</span>{concept.uncertainty}</p>
       <p><span className="small-label">Prerequisites</span>{concept.prerequisiteIds.map(conceptName).join(', ') || 'None recorded.'}</p>
@@ -168,14 +168,14 @@ function CurriculumDetails({ curriculum, reviews, lessonReviews }: { curriculum:
       {concept.evidenceAttemptIds.length > 0 && <div><span className="small-label">Prior evidence</span><ul>{evidence(concept.evidenceAttemptIds)}</ul></div>}
       <p><span className="small-label">Next probe</span>{concept.nextProbe}</p>
     </details>)}</div>}
-    {curriculum.observations.length > 0 && <div className="notebook-section"><h3>Observations from prior answers</h3>{curriculum.observations.map((item, index) => <div className="hypothesis-card" key={index}>
+    {curriculum.observations.length > 0 && <div id="lesson-observations" tabIndex={-1} className="notebook-section"><h3>Observations from prior answers</h3>{curriculum.observations.map((item, index) => <div className="hypothesis-card" key={index}>
       <p className="fine-print">{item.conceptIds.map(conceptName).join(' · ')}</p>
       <p><span className="small-label">Observed</span>{item.observation}</p>
       <p><span className="small-label">Interpretation</span>{item.interpretation}</p>
       <p><span className="small-label">Next action</span>{item.nextAction}</p>
       {item.attemptIds.length > 0 && <details className="plain-details"><summary>Referenced answers</summary><ul>{evidence(item.attemptIds)}</ul></details>}
     </div>)}</div>}
-    {lessonReviews.some((review) => review.question.plan) && <div className="notebook-section"><h3>Variants and deferred counterparts</h3>{lessonReviews.map(({ question }) => question.plan && <details className="plain-details" key={question.id}><summary>{question.title} · {question.plan.counterpart === 'in-lesson' ? 'counterpart in this lesson' : question.plan.counterpart === 'defer' ? 'counterpart deferred' : 'counterpart unasked'}</summary>
+    {lessonReviews.some((review) => review.question.plan) && <div id="lesson-variants" tabIndex={-1} className="notebook-section"><h3>Variants and deferred counterparts</h3>{lessonReviews.map(({ question }) => question.plan && <details className="plain-details" key={question.id}><summary>{question.title} · {question.plan.counterpart === 'in-lesson' ? 'counterpart in this lesson' : question.plan.counterpart === 'defer' ? 'counterpart deferred' : 'counterpart unasked'}</summary>
       <p>{question.plan.variantReason}</p><p className="fine-print">Family: {question.plan.familyId}</p>
     </details>)}</div>}
   </details>;
@@ -185,20 +185,54 @@ function Notebook({ state, selectedId, onSelect, onReview, onPractice }: { state
   const ordered = [...state.lessons].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const selected = ordered.find((lesson) => lesson.id === selectedId) || ordered[0];
   const reviews = selected ? state.reviews.filter((review) => review.attempt.lessonId === selected.id).sort((a, b) => Date.parse(a.attempt.answeredAt) - Date.parse(b.attempt.answeredAt)) : [];
+  const discussions = state.discussions.filter(item => item.lessonId === selected?.id);
+  const curriculum = selected?.complete ? selected.curriculum : undefined;
+  const sections = [
+    { id: 'lesson-overview', label: 'Overview' },
+    ...(selected?.complete ? [
+      { id: 'lesson-reflection', label: 'Reflection' },
+      { id: 'lesson-assumptions', label: 'Assumptions' },
+      { id: 'lesson-hypotheses', label: 'Hypotheses' },
+    ] : []),
+    ...(curriculum ? [{ id: 'lesson-curriculum', label: 'Curriculum planning' },
+      ...(curriculum.frontier.length ? [{ id: 'lesson-frontier', label: 'Frontier decisions', nested: true }] : []),
+      ...(curriculum.conceptUpdates.length ? [{ id: 'lesson-concepts', label: 'Concept notes', nested: true }] : []),
+      ...(curriculum.observations.length ? [{ id: 'lesson-observations', label: 'Observations', nested: true }] : []),
+      ...(reviews.some(item => item.question.plan) ? [{ id: 'lesson-variants', label: 'Variants', nested: true }] : []),
+    ] : []),
+    ...(selected?.feedback ? [{ id: 'lesson-feedback-record', label: 'Your feedback' }] : []),
+    ...discussions.map((item, index) => ({ id: `lesson-conversation-${item.id}`, label: discussions.length > 1 ? `Conversation ${index + 1}` : 'Tutor conversation' })),
+    { id: 'lesson-answers', label: 'Answers & predictions' },
+    { id: 'lesson-commitment', label: 'Prediction commitment' },
+  ];
+  const navigate = (id: string) => {
+    const target = document.getElementById(id);
+    if (!target) return;
+    // Reveal nested destinations before scrolling to them.
+    for (let parent: HTMLElement | null = target; parent; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
+    }
+    target.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    target.focus({ preventScroll: true });
+  };
   return <div className="notebook-view"><div className="page-intro"><div><div className="eyebrow">Your local record</div><h1>Tutor notebook</h1><p className="muted">Lessons, answers, feedback, and the tutor’s reasoning.</p></div><a className="button quiet" href="/api/export" download><Download size={17} /> Export record</a></div>
     <details className="notebook-metrics"><summary>Tutor prediction metrics</summary><Accountability metrics={state.metrics} settings={state.settings} /></details>
     {ordered.length === 0 ? <div className="panel empty-state"><BookOpen size={36} /><h2>A fresh notebook.</h2><p>Your first lesson will appear here.</p></div> : <div className="notebook-grid"><div className="lesson-list" aria-label="Lessons">{ordered.map((lesson, index) => <button key={lesson.id} onClick={() => onSelect(lesson.id)} className={`lesson-list-item ${selected?.id === lesson.id ? 'selected' : ''}`} aria-pressed={selected?.id === lesson.id}><span className="small-label">Lesson {ordered.length - index} · {PROVIDER_NAMES[lesson.provider]}</span><strong>{lesson.objective}</strong><span>{date(lesson.createdAt)}</span><span className="lesson-list-status">{lesson.answered}/{lesson.total} answers <Badge tone={lesson.complete ? 'green' : ''}>{lesson.complete ? 'Complete' : 'In progress'}</Badge></span></button>)}</div>
-      {selected && <section className="panel notebook-detail"><div className="eyebrow">{PROVIDER_NAMES[selected.provider]} · {selected.tutorMode}</div><h2>{selected.objective}</h2><p>{selected.rationale}</p>
-        {selected.complete ? <><div className="notebook-section"><h3>Reflection before this lesson</h3><p className="preserve-lines">{selected.reflection || 'No prior reflection recorded.'}</p></div><div className="notebook-section"><h3>Starting assumptions</h3>{selected.assumptions.length ? <ul>{selected.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p className="muted">No assumptions recorded.</p>}</div><div className="notebook-section"><h3>Working hypotheses</h3><p className="fine-print">These are tentative explanations, not fixed labels about you.</p>{selected.hypotheses.length ? selected.hypotheses.map((hypothesis) => <HypothesisCard key={hypothesis.id} hypothesis={hypothesis} reviews={state.reviews} />) : <p className="muted">No hypotheses recorded for this lesson.</p>}</div></> : <div className="notice">Finish this lesson to reveal its assumptions, reflection, and hypotheses.</div>}
+      {selected && <section key={selected.id} id="lesson-overview" tabIndex={-1} className="panel notebook-detail"><div className="eyebrow">{PROVIDER_NAMES[selected.provider]} · {selected.tutorMode}</div><h2>{selected.objective}</h2><p>{selected.rationale}</p>
+        {selected.complete ? <><div id="lesson-reflection" tabIndex={-1} className="notebook-section"><h3>Reflection before this lesson</h3><p className="preserve-lines">{selected.reflection || 'No prior reflection recorded.'}</p></div><div id="lesson-assumptions" tabIndex={-1} className="notebook-section"><h3>Starting assumptions</h3>{selected.assumptions.length ? <ul>{selected.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p className="muted">No assumptions recorded.</p>}</div><div id="lesson-hypotheses" tabIndex={-1} className="notebook-section"><h3>Working hypotheses</h3><p className="fine-print">These are tentative explanations, not fixed labels about you.</p>{selected.hypotheses.length ? selected.hypotheses.map((hypothesis) => <HypothesisCard key={hypothesis.id} hypothesis={hypothesis} reviews={state.reviews} />) : <p className="muted">No hypotheses recorded for this lesson.</p>}</div></> : <div className="notice">Finish this lesson to reveal its assumptions, reflection, and hypotheses.</div>}
         {selected.complete && selected.curriculum && <CurriculumDetails curriculum={selected.curriculum} reviews={state.reviews} lessonReviews={reviews} />}
-        {selected.feedback && <div className="notebook-section" data-testid="saved-lesson-feedback"><h3>Your lesson feedback</h3><p className="preserve-lines">{selected.feedback.text || 'No written feedback.'}</p><p className="fine-print">{selected.feedback.accidentalAttemptIds.length} accidental answers excluded · {date(selected.feedback.updatedAt)}</p></div>}
-        {state.discussions.filter(item => item.lessonId === selected.id).map(item => <div className="notebook-section" key={item.id}><h3>Tutor conversation · {date(item.createdAt)}</h3>{item.feedbackText && <details className="plain-details"><summary>Feedback shared</summary><p className="preserve-lines">{item.feedbackText}</p></details>}<p className="preserve-lines">{item.reflection}</p>{item.questions.map(question => <div className="conversation-reply" key={question.id}><h4>{question.text}</h4><p className="preserve-lines">{question.answer ?? (question.skipped ? 'Skipped' : 'No reply yet')}</p></div>)}</div>)}
-        <div className="notebook-section"><h3>Answers & committed predictions</h3>{reviews.length === 0 && <p className="muted">No answers yet.</p>}{reviews.map((review) => {
+        {selected.feedback && <div id="lesson-feedback-record" tabIndex={-1} className="notebook-section" data-testid="saved-lesson-feedback"><h3>Your lesson feedback</h3><p className="preserve-lines">{selected.feedback.text || 'No written feedback.'}</p><p className="fine-print">{selected.feedback.accidentalAttemptIds.length} accidental answers excluded · {date(selected.feedback.updatedAt)}</p></div>}
+        {discussions.map(item => <div id={`lesson-conversation-${item.id}`} tabIndex={-1} className="notebook-section" key={item.id}><h3>Tutor conversation · {date(item.createdAt)}</h3>{item.feedbackText && <details className="plain-details"><summary>Feedback shared</summary><p className="preserve-lines">{item.feedbackText}</p></details>}<p className="preserve-lines">{item.reflection}</p>{item.questions.map(question => <div className="conversation-reply" key={question.id}><h4>{question.text}</h4><p className="preserve-lines">{question.answer ?? (question.skipped ? 'Skipped' : 'No reply yet')}</p></div>)}</div>)}
+        <div id="lesson-answers" tabIndex={-1} className="notebook-section"><h3>Answers & committed predictions</h3>{reviews.length === 0 && <p className="muted">No answers yet.</p>}{reviews.map((review) => {
           const sessions = (state.reviewSessions || []).filter((session) => session.attemptId === review.attempt.id);
           return <button className="answer-history answer-history-button" key={review.attempt.id} onClick={() => onReview(review.attempt.id)} data-testid="notebook-review" data-attempt-id={review.attempt.id}><span className={`answer-dot ${review.attempt.correct === null ? 'neutral' : review.attempt.correct ? 'green' : 'red'}`} /><span>{review.question.title}<small>{answerLabel(review.attempt.answer)} · {resultLabel(review.attempt.correct)} · {percent(review.question.prediction.pCorrect)} predicted{review.attempt.flagged ? ` · ${review.attempt.exclusionReason === 'accidental-input' ? 'accidental input' : 'flagged'}; excluded` : ''}</small><small>{sessions.length ? `${sessions.length} review ${sessions.length === 1 ? 'opening' : 'openings'} · ${(sessions.reduce((total, session) => total + session.activeMs, 0) / 1000).toFixed(1)}s active` : 'No recorded review'}</small></span><ChevronRight size={16} /></button>;
         })}</div>
-        <details className="plain-details"><summary>Prediction commitment</summary><p className="fine-print">Predictions were saved before the lesson’s first answer.</p><code className="hash">{selected.predictionHash}</code></details><div className="review-footer"><button className="button primary" onClick={onPractice}>{state.question ? 'Resume lesson' : 'Back to practice'}<ArrowRight size={17} /></button></div>
-      </section>}</div>}
+        <details id="lesson-commitment" tabIndex={-1} className="plain-details"><summary>Prediction commitment</summary><p className="fine-print">Predictions were saved before the lesson’s first answer.</p><code className="hash">{selected.predictionHash}</code></details><div className="review-footer"><button className="button primary" onClick={onPractice}>{state.question ? 'Resume lesson' : 'Back to practice'}<ArrowRight size={17} /></button></div>
+      </section>}
+      {selected && <aside className="notebook-section-nav"><span className="small-label">On this lesson</span>
+        <nav aria-label="Lesson sections">{sections.map(section => <a key={section.id} className={'nested' in section ? 'nested' : ''} href={`#${section.id}`} onClick={event => { event.preventDefault(); navigate(section.id); }}>{section.label}</a>)}</nav>
+        <select aria-label="Jump to lesson section" value="" onChange={event => navigate(event.target.value)}><option value="" disabled>Jump to section…</option>{sections.map(section => <option key={section.id} value={section.id}>{section.label}</option>)}</select>
+      </aside>}</div>}
   </div>;
 }
 
@@ -235,9 +269,9 @@ function readFeedbackDraft(lesson: LessonSummary, reviews: Review[]): FeedbackDr
   } catch { /* Server feedback remains the default when browser storage is unavailable. */ }
   return { text: lesson.feedback?.text || '', accidentalAttemptIds: lesson.feedback?.accidentalAttemptIds || reviews.filter((item) => item.attempt.exclusionReason === 'accidental-input').map((item) => item.attempt.id) };
 }
-function LessonComplete({ lesson, reviews, discussion, job, pending, canPlan, reflective, onSave, onDiscuss, onCancel, onNext, onNotebook }: {
+function LessonComplete({ lesson, reviews, discussion, job, pending, canPlan, reflective, onSave, onDiscuss, onCancel, onNext, onNotebook, onReview }: {
   lesson: LessonSummary; reviews: Review[]; discussion?: Discussion; job: Job | null; pending: string; canPlan: boolean; reflective: boolean;
-  onSave: (draft: FeedbackDraft) => void; onDiscuss: (draft: FeedbackDraft) => void; onCancel: () => void; onNext: (draft: FeedbackDraft) => void; onNotebook: () => void;
+  onSave: (draft: FeedbackDraft) => void; onDiscuss: (draft: FeedbackDraft) => void; onCancel: () => void; onNext: (draft: FeedbackDraft) => void; onNotebook: () => void; onReview: (id: string) => void;
 }) {
   const [initial] = useState(() => readFeedbackDraft(lesson, reviews));
   const [text, setText] = useState(initial.text);
@@ -264,7 +298,19 @@ function LessonComplete({ lesson, reviews, discussion, job, pending, canPlan, re
     <label htmlFor="lesson-feedback">Anything your tutor should know? <span className="label-note">Optional</span></label>
     <p className="feedback-help fine-print">Share anything: how you reasoned, what confused you, corrections, pacing, or what you want next. Your tutor can reconsider its assumptions using your feedback.</p>
     <textarea id="lesson-feedback" data-testid="lesson-feedback" rows={3} maxLength={4000} value={text} onChange={(event) => setText(event.target.value)} placeholder="For example: I understood the loop, but guessed because the input shape was unclear. I'd like more networking examples." disabled={disabled} />
-    <details className="plain-details accidental-details"><summary>Mark accidental answers</summary><p className="fine-print">Exclude a misclick or unintended swipe from scoring and tutor evidence. Your original answer stays in your notebook.</p><div className="accidental-answers">{reviews.map((review) => <label key={review.attempt.id}><input type="checkbox" data-testid="accidental-answer" value={review.attempt.id} checked={accidentalAttemptIds.includes(review.attempt.id)} disabled={disabled} onChange={(event) => setAccidentalAttemptIds((ids) => event.target.checked ? [...ids, review.attempt.id] : ids.filter((id) => id !== review.attempt.id))} /><span>{review.question.title}<small>Chose {answerLabel(review.attempt.answer)}</small></span></label>)}</div></details>
+    <details className="plain-details completion-summary" data-testid="detailed-summary"><summary>Detailed summary</summary>
+      <p className="fine-print">See each answer and the code’s verdict. Mark accidental inputs to exclude them when you save feedback or continue.</p>
+      <ol className="completion-answer-list">{[...reviews].reverse().map(({ question, attempt }, index) => <li className="completion-answer" key={attempt.id} data-attempt-id={attempt.id}>
+        <div className="completion-answer-heading"><div><span className="small-label">Card {index + 1}</span><h3>{question.title}</h3></div><button className="button compact quiet" onClick={() => onReview(attempt.id)} aria-label={`Review ${question.title}`} data-testid="summary-review">Review<ChevronRight size={14} /></button></div>
+        <dl className="completion-answer-facts">
+          <div><dt>Your answer</dt><dd>{answerLabel(attempt.answer)}</dd></div>
+          <div><dt>Code shown</dt><dd>{answerLabel(question.verdict)}</dd></div>
+          <div><dt>Your result</dt><dd className={`completion-result ${resultTone(attempt.correct)}`}>{attempt.correct === null ? <><HelpCircle size={15} />Ungraded</> : attempt.correct ? <><CheckCircle2 size={15} />Right</> : <><X size={15} />Wrong</>}</dd></div>
+        </dl>
+        <label className="completion-accidental"><input type="checkbox" data-testid="accidental-answer" value={attempt.id} checked={accidentalAttemptIds.includes(attempt.id)} disabled={disabled} onChange={event => setAccidentalAttemptIds(ids => event.target.checked ? [...ids, attempt.id] : ids.filter(id => id !== attempt.id))} aria-label={`Accidental input: ${question.title}`} /><span>Accidental input</span></label>
+        {attempt.flagged && <p className="fine-print">Excluded from scoring · {attempt.exclusionReason === 'accidental-input' ? 'accidental input' : 'flagged question'}</p>}
+      </li>)}</ol>
+    </details>
     <div className="feedback-save"><span className="fine-print" role="status">{pending === 'feedback' ? 'Saving feedback…' : changed ? 'Saved before your next lesson.' : lesson.feedback ? 'Feedback saved.' : 'Feedback is optional.'}</span><button className="button compact quiet" onClick={() => onSave(draft)} disabled={disabled || !changed} data-testid="save-feedback">Save feedback</button></div>
     {reflective ? <div className="tutor-feedback-actions"><button className="button quiet" onClick={() => onDiscuss(draft)} disabled={disabled || !canPlan} data-testid="discuss-feedback"><Sparkles size={17} />{discussion ? 'Update tutor' : 'Send to tutor'}</button><p className="fine-print">Get a response and optional follow-up questions, or go straight to the next lesson.</p></div> : <p className="fine-print feedback-help">Baseline mode saves your notes but does not use learner history. Choose reflective mode in Setup for tutor conversations.</p>}
     {discussing && <div className="notice discussion-progress" role="status"><LoaderCircle className="spin" size={18} /><div><strong>Your tutor is thinking…</strong><p>You can continue without waiting.</p></div><button className="button compact quiet" onClick={onCancel} disabled={Boolean(pending)}>Cancel</button></div>}
@@ -506,7 +552,7 @@ export default function App() {
             : <>
               {state.job?.status === 'error' && <div className="notice error" role="alert"><strong>{state.job.kind === 'discussion' ? 'Tutor response stopped' : 'Lesson preparation stopped'}</strong><p>{state.job.message}</p><p className="fine-print">{state.job.kind === 'discussion' ? 'Your feedback is saved. Retry or continue to the next lesson.' : 'Check Setup, then retry.'}</p></div>}
               {state.job?.status === 'cancelled' && <div className="notice">{state.job.kind === 'discussion' ? 'Follow-up cancelled. Your feedback is saved.' : 'Planning cancelled. You can try again.'}</div>}
-              {lesson?.complete ? <><div className="lesson-progress"><div><span className="eyebrow">Lesson {state.lessons.length}</span><span className="muted">Complete</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.total} data-testid="lesson-progress"><span style={{ width: '100%' }} /></div></div><LessonComplete key={lesson.id} lesson={lesson} reviews={state.reviews.filter((item) => item.attempt.lessonId === lesson.id)} discussion={state.discussions.filter(item => item.lessonId === lesson.id).at(-1)} job={state.job} pending={pending} canPlan={!connectionError && Boolean(chosenProvider?.available)} reflective={state.settings.tutorMode === 'reflective'} onSave={(draft) => void mutate('feedback', () => saveCompletion(draft))} onDiscuss={(draft) => void discussFeedback(draft)} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onNext={(draft) => void startLesson(false, draft)} onNotebook={() => { setSelectedLessonId(lesson.id); changeView('notebook'); }} /></>
+              {lesson?.complete ? <><div className="lesson-progress"><div><span className="eyebrow">Lesson {state.lessons.length}</span><span className="muted">Complete</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.total} data-testid="lesson-progress"><span style={{ width: '100%' }} /></div></div><LessonComplete key={lesson.id} lesson={lesson} reviews={state.reviews.filter((item) => item.attempt.lessonId === lesson.id)} discussion={state.discussions.filter(item => item.lessonId === lesson.id).at(-1)} job={state.job} pending={pending} canPlan={!connectionError && Boolean(chosenProvider?.available)} reflective={state.settings.tutorMode === 'reflective'} onSave={(draft) => void mutate('feedback', () => saveCompletion(draft))} onDiscuss={(draft) => void discussFeedback(draft)} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onNext={(draft) => void startLesson(false, draft)} onReview={setReviewId} onNotebook={() => { setSelectedLessonId(lesson.id); changeView('notebook'); }} /></>
                 : <section className="welcome-panel"><Code2 size={38} /><h1 ref={heading} tabIndex={-1}>Read code. Make a call.</h1><p className="welcome-copy">Swipe left for buggy. Right for correct. IDK when you’re unsure.</p><div className="welcome-actions"><button className="button primary" onClick={() => void startLesson(false)} disabled={Boolean(pending) || Boolean(connectionError) || !chosenProvider?.available} data-testid="start-lesson">{pending === 'start' ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{state.job?.status === 'error' ? 'Retry lesson' : 'Start lesson'}<ArrowRight size={18} /></button>{state.settings.provider !== 'demo' && <button className="button quiet" onClick={() => void startLesson(true)} disabled={Boolean(pending) || Boolean(connectionError)} data-testid="try-demo"><FlaskConical size={17} /> Try demo</button>}</div><div className="current-setup"><span>{PROVIDER_NAMES[state.settings.provider]} · {state.settings.batchSize} cards</span><button className="text-button" onClick={() => changeView('settings')}>Setup<ChevronRight size={14} /></button></div>{!chosenProvider?.available && <p className="fine-print">Set up your local agent, or try the demo.</p>}</section>}
             </>}
           {!state.question && previousAnswer}
