@@ -1,4 +1,5 @@
 import type { JsonValue, ProposedLesson, ProposedQuestion, TutorContext, Verdict } from '../src/types.ts';
+import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from '../src/lesson-sizes.ts';
 
 interface Example {
   title: string;
@@ -83,10 +84,46 @@ const EXAMPLES: Example[] = [
     explanation: 'The inner maximum enforces the lower bound, then the outer minimum enforces the upper bound. Values already in range pass through, including both boundaries.',
     fixtures: [[{ value: 5, min: 0, max: 10 }, 5, 'Inside range'], [{ value: -3, min: 0, max: 10 }, 0, 'Below minimum'], [{ value: 12, min: 0, max: 10 }, 10, 'Above maximum'], [{ value: -2, min: -2, max: -2 }, -2, 'Equal bounds and negative value']],
   },
+  {
+    title: 'Count every odd integer',
+    specification: 'Given an array of integers, return how many are odd. Negative odd integers count too. The empty array has zero odd integers. Do not modify the input.',
+    code: '/** @param {number[]} input @returns {number} */\nfunction solve(input) {\n  return input.filter(value => value % 2 === 1).length;\n}',
+    referenceCode: '/** @param {number[]} input @returns {number} */\nfunction solve(input) { return input.filter(value => value % 2 !== 0).length; }',
+    verdict: 'buggy',
+    explanation: 'JavaScript remainders keep the sign of the dividend. A negative odd integer has remainder -1, so comparing only with 1 misses it. For [-3, -2, -1], the answer should be 2, but this returns 0.',
+    fixtures: [[[], 0, 'Empty input'], [[1, 2, 3], 2, 'Positive odd integers'], [[-3, -2, -1], 2, 'Negative odd integers'], [[-5, 0, 4, 7], 2, 'Mixed signs and zero']],
+  },
+  {
+    title: 'Measure successive changes',
+    specification: 'Given an array of integers between -1000 and 1000 inclusive, return a new array of differences between successive readings: each reading minus the one immediately before it. Empty and single-reading arrays return an empty array. Do not modify the input.',
+    code: '/** @param {number[]} input @returns {number[]} */\nfunction solve(input) {\n  return input.slice(1).map((value, index) => value - input[index]);\n}',
+    referenceCode: '/** @param {number[]} input @returns {number[]} */\nfunction solve(input) { const changes = []; for (let i = 1; i < input.length; i++) changes.push(input[i] - input[i - 1]); return changes; }',
+    verdict: 'correct',
+    explanation: 'Slicing starts at the second reading. Its mapped index still points to the preceding reading in the original array, so every subtraction uses the intended pair. Inputs with fewer than two readings produce no differences.',
+    fixtures: [[[], [], 'Empty input'], [[4], [], 'Single reading'], [[2, 5, 1], [3, -4], 'Increase then decrease'], [[-2, -2, 0, -3], [0, 2, -3], 'Repeated readings and mixed signs']],
+  },
+  {
+    title: 'Allocate groups of three',
+    specification: 'Given a nonnegative integer item count, return the minimum number of groups needed when each group holds at most three items. Any remaining items require another group. Zero items need zero groups.',
+    code: '/** @param {number} input @returns {number} */\nfunction solve(input) {\n  return Math.round(input / 3);\n}',
+    referenceCode: '/** @param {number} input @returns {number} */\nfunction solve(input) { return Math.ceil(input / 3); }',
+    verdict: 'buggy',
+    explanation: 'Rounding to the nearest integer can discard a partially filled group. Four items need two groups, but Math.round(4 / 3) returns 1. The quotient must always round upward.',
+    fixtures: [[0, 0, 'No items'], [1, 1, 'One item still needs a group'], [3, 1, 'Exactly one full group'], [4, 2, 'One remaining item'], [8, 3, 'Two remaining items']],
+  },
+  {
+    title: 'Normalize label spacing',
+    specification: 'Given a string, remove leading and trailing whitespace, then replace every remaining run of whitespace with one ordinary space. Whitespace includes spaces, tabs, and line breaks. Preserve all non-whitespace characters and their case. An empty or whitespace-only string returns an empty string.',
+    code: '/** @param {string} input @returns {string} */\nfunction solve(input) {\n  return input.trim().replace(/\\s+/g, " ");\n}',
+    referenceCode: '/** @param {string} input @returns {string} */\nfunction solve(input) { return input.trim().split(/\\s+/).join(" "); }',
+    verdict: 'correct',
+    explanation: 'trim removes whitespace at both ends, and the global replacement collapses every internal whitespace run to one space. Non-whitespace characters stay unchanged, while empty and whitespace-only inputs produce an empty string.',
+    fixtures: [['', '', 'Empty input'], ['  Reel  Data  ', 'Reel Data', 'Outer and repeated inner spaces'], ['\tCod\nsalmon\r\n', 'Cod salmon', 'Tabs and line breaks'], ['A-B', 'A-B', 'Already normalized'], [' \t\n ', '', 'Whitespace only']],
+  },
 ];
 
 export function createDemoLesson(context: TutorContext): ProposedLesson {
-  const count = [4, 6, 8].includes(context.settings.batchSize) ? context.settings.batchSize : 4;
+  const count = LESSON_SIZES.some(size => size === context.settings.batchSize) ? context.settings.batchSize : DEFAULT_LESSON_SIZE;
   const questions: ProposedQuestion[] = EXAMPLES.slice(0, count).map(example => ({
     title: example.title,
     specification: example.specification,

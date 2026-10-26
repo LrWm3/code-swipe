@@ -33,7 +33,7 @@ The demo uses curated examples and neutral predictions. It is not adaptive. For 
 
 ## What this v1 does
 
-- Plans 4, 6, or 8 questions at a time, with explicit assumptions, alternative explanations, and predictions.
+- Plans 6, 8, or 12 questions at a time (8 by default), with explicit assumptions, alternative explanations, and predictions.
 - Runs each reference solution and candidate against generated fixtures inside QuickJS, with time and memory limits. Failed batches get one repair attempt before being rejected.
 - Saves immutable plan artifacts before showing a question. Answers append to local history; retries do not duplicate them.
 - Records review openings and estimated active viewing time, so the tutor can account for explanations you chose to inspect. Background or unfocused time is paused.

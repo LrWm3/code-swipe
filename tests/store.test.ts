@@ -118,7 +118,7 @@ test('given an unanswered lesson, when requesting public state, then future verd
   assert.equal(during.reviews.length, 1);
   assert.equal(during.reviews[0].question.explanation, 'PRIVATE_EXPLANATION_0');
   assert.equal(during.reviews[0].question.prediction.rationale, 'PRIVATE_PREDICTION_0');
-  assert.doesNotMatch(JSON.stringify(during), /PRIVATE_(?:EXPLANATION|PREDICTION|REFERENCE|IF_CORRECT|IF_INCORRECT)_[123]|PRIVATE_.*_UNTIL_COMPLETE/);
+  assert.doesNotMatch(JSON.stringify(during), /PRIVATE_(?:EXPLANATION|PREDICTION|REFERENCE|IF_CORRECT|IF_INCORRECT)_[1-9]\d*|PRIVATE_.*_UNTIL_COMPLETE/);
   assert.equal(during.currentLesson?.complete, false);
   for (const question of committed.questions.slice(1)) store.answer(question.id, question.verdict, 1_000);
   const after = store.publicState([], null);
@@ -161,12 +161,13 @@ test('given a flagged attempt, when calculating calibration and next tutor conte
   next.hypotheses[0].supportingAttemptIds = [firstAttempt.id];
   const secondLesson = store.commitLesson(await validateLesson(next, context), context.settings);
   finish(store, secondLesson);
+  const totalQuestions = firstLesson.questions.length + secondLesson.questions.length;
   const before = store.publicState([], null).metrics;
-  assert.equal(before.count, 8);
+  assert.equal(before.count, totalQuestions);
   assert.equal(before.brier, 0.25);
   store.flagAttempt(firstAttempt.id, true);
   const state = store.publicState([], null);
-  assert.equal(state.metrics.count, 7);
+  assert.equal(state.metrics.count, totalQuestions - 1);
   assert.equal(state.reviews.find(review => review.attempt.id === firstAttempt.id)?.attempt.flagged, true);
   const refreshed = store.context();
   assert.ok(refreshed.history.every(item => item.attempts.every(attempt => attempt.id !== firstAttempt.id)));
@@ -175,7 +176,7 @@ test('given a flagged attempt, when calculating calibration and next tutor conte
   assert.equal(store.snapshot().lessons[1].hypotheses[0].status, 'supported');
   assert.deepEqual(store.snapshot().lessons[1].hypotheses[0].supportingAttemptIds, [firstAttempt.id]);
   store.flagAttempt(firstAttempt.id, false);
-  assert.equal(store.publicState([], null).metrics.count, 8);
+  assert.equal(store.publicState([], null).metrics.count, totalQuestions);
   assert.equal(store.context().hypotheses[0].status, 'supported');
   assert.throws(() => store.flagAttempt('missing', true), appError(404, /not found/));
 });
@@ -242,7 +243,7 @@ test('given accumulated reflective history, when switching to baseline, then tut
   assert.equal(baseline.metrics.count, 0);
   assert.equal(baseline.metrics.brier, null);
   assert.equal(store.publicState([], null).metrics.count, 0);
-  assert.equal(store.snapshot().attempts.length, 4);
+  assert.equal(store.snapshot().attempts.length, lesson.questions.length);
   assert.equal(store.snapshot().reviewSessions?.length, 1);
   assert.equal(store.snapshot().feedback?.length, 1);
 });
@@ -290,8 +291,8 @@ test('given an uncertain response, when choosing IDK and restarting, then it adv
   assert.equal(state.metrics.count, lesson.questions.length - 1);
   assert.equal(state.metrics.accuracy, 1);
   assert.equal(state.metrics.brier, 0.25);
-  assert.equal(state.metrics.calibration.reduce((total, bin) => total + bin.count, 0), 3);
-  assert.equal(state.metrics.byPurpose.reduce((total, purpose) => total + purpose.count, 0), 3);
+  assert.equal(state.metrics.calibration.reduce((total, bin) => total + bin.count, 0), lesson.questions.length - 1);
+  assert.equal(state.metrics.byPurpose.reduce((total, purpose) => total + purpose.count, 0), lesson.questions.length - 1);
   assert.equal(reopened.snapshot().attempts[0].correct, null);
   assert.equal(reopened.context().history[0].attempts[0].answer, 'idk');
 });
@@ -365,7 +366,7 @@ test('given completed lesson feedback, when accidental answers are added and rem
   assert.deepEqual(state.feedback[0].accidentalAttemptIds, [accidental.id]);
   assert.match(state.feedback[0].text, /boundary example helped/);
   assert.deepEqual(state.currentLesson?.feedback, state.feedback[0]);
-  assert.equal(state.metrics.count, 2);
+  assert.equal(state.metrics.count, lesson.questions.length - 2);
   assert.equal(state.metrics.accuracy, 1);
   const flagged = reopened.snapshot().attempts.find(item => item.id === accidental.id)!;
   assert.equal(flagged.flagged, true);
@@ -384,7 +385,7 @@ test('given completed lesson feedback, when accidental answers are added and rem
   assert.equal(edited.snapshot().attempts.find(item => item.id === accidental.id)?.flagged, false);
   assert.equal(edited.snapshot().attempts.find(item => item.id === flawed.id)?.flagged, true);
   assert.equal(edited.snapshot().attempts.find(item => item.id === flawed.id)?.exclusionReason, 'flawed-question');
-  assert.equal(edited.publicState([], null).metrics.count, 3);
+  assert.equal(edited.publicState([], null).metrics.count, lesson.questions.length - 1);
   assert.equal(readFileSync(artifactPath, 'utf8'), sealed);
 });
 
@@ -418,7 +419,7 @@ test('given a flawed question also marked accidental, when feedback retracts the
   const original = store.snapshot().attempts[0];
   store.flagAttempt(original.id, true, 'flawed-question');
   store.saveFeedback(lesson.id, { text: 'The question is flawed and my swipe was accidental.', accidentalAttemptIds: [original.id] });
-  assert.equal(store.publicState([], null).metrics.count, 3);
+  assert.equal(store.publicState([], null).metrics.count, lesson.questions.length - 1);
 
   const reopened = new LocalStore(store.directory);
   reopened.saveFeedback(lesson.id, { text: 'My swipe was intentional; the question remains flawed.', accidentalAttemptIds: [] });
@@ -427,7 +428,7 @@ test('given a flawed question also marked accidental, when feedback retracts the
   assert.equal(attempt.exclusionReason, 'flawed-question');
   assert.equal(attempt.answer, original.answer);
   assert.equal(attempt.correct, original.correct);
-  assert.equal(reopened.publicState([], null).metrics.count, 3);
+  assert.equal(reopened.publicState([], null).metrics.count, lesson.questions.length - 1);
   assert.ok(reopened.context().history[0].attempts.every(item => item.id !== original.id));
   assert.deepEqual(reopened.snapshot().feedback?.[0].accidentalAttemptIds, []);
 });
@@ -445,7 +446,7 @@ test('given saved feedback identifying an accidental answer, when that same acci
   assert.equal(reopened.snapshot().feedback?.[0].text, 'The first swipe was accidental.');
   assert.equal(reopened.snapshot().attempts[0].flagged, true);
   assert.equal(reopened.snapshot().attempts[0].exclusionReason, 'accidental-input');
-  assert.equal(reopened.publicState([], null).metrics.count, 3);
+  assert.equal(reopened.publicState([], null).metrics.count, lesson.questions.length - 1);
   assert.deepEqual(reopened.context().feedback?.[0].accidentalAttemptIds, [attempt.id]);
 });
 
@@ -470,7 +471,7 @@ test('given a retention proposal, when its cited observation is recent missing o
 test('given malformed settings, when parsing or saving them, then invalid provider model mode and batch values cannot replace saved preferences', t => {
   const store = temporaryStore(t);
   const before = store.snapshot().settings;
-  for (const invalid of [null, [], { ...before, provider: 'remote' }, { ...before, model: '--exec' }, { ...before, model: 'name; echo secret' }, { ...before, batchSize: '4' }, { ...before, batchSize: 5 }, { ...before, interests: 'x'.repeat(2_001) }, { ...before, tutorMode: 'adaptive' }]) {
+  for (const invalid of [null, [], { ...before, provider: 'remote' }, { ...before, model: '--exec' }, { ...before, model: 'name; echo secret' }, { ...before, batchSize: '8' }, { ...before, batchSize: 5 }, { ...before, interests: 'x'.repeat(2_001) }, { ...before, tutorMode: 'adaptive' }]) {
     assert.throws(() => parseSettings(invalid), AppError);
     assert.throws(() => store.saveSettings(invalid as Settings), AppError);
     assert.deepEqual(store.snapshot().settings, before);

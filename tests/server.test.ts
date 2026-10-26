@@ -77,14 +77,14 @@ test('given malformed requests, when parsed, then errors remain JSON and no stat
 });
 
 test('given demo setup, when a lesson is played through the API, then answers persist and predictions stay hidden until answered', async () => {
-  assert.equal((await json('/api/settings', 'PUT', { provider: 'demo', model: '', interests: 'networks', batchSize: 4, tutorMode: 'reflective' })).status, 200);
+  assert.equal((await json('/api/settings', 'PUT', { provider: 'demo', model: '', interests: 'networks', batchSize: 6, tutorMode: 'reflective' })).status, 200);
   assert.equal((await json('/api/plan', 'POST', {})).status, 202);
   await service.settled();
   const response = await json('/api/state');
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const state = await response.json();
   assert.equal(state.job.status, 'ready');
-  assert.equal(state.currentLesson.total, 4);
+  assert.equal(state.currentLesson.total, 6);
   assert.ok(state.question.code);
   assert.equal(state.question.verdict, undefined);
   assert.equal(state.question.prediction, undefined);
@@ -138,7 +138,7 @@ test('given a completed API lesson with IDK and review time, when feedback marks
   assert.equal(feedbackResponse.status, 200);
   const state = await feedbackResponse.json() as AppState;
   assert.equal(state.currentLesson?.complete, true);
-  assert.equal(state.metrics.count, 2);
+  assert.equal(state.metrics.count, lesson.questions.length - 2);
   assert.equal(state.metrics.accuracy, 1);
   assert.equal(state.feedback.length, 1);
   assert.deepEqual(state.currentLesson?.feedback, state.feedback[0]);

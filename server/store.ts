@@ -3,11 +3,12 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFil
 import { resolve, join } from 'node:path';
 import type { AppState, Attempt, Lesson, LessonSummary, Metrics, ProposedLesson, ProviderStatus, Review, ReviewSession, LessonFeedback, Settings, StoreData, TutorContext, ValidationReport, Answer, Job, Discussion, DiscussionContext, ProposedDiscussion } from '../src/types.ts';
 import { parseDiscussionOutput } from './discussion.ts';
+import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from '../src/lesson-sizes.ts';
 
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
-export const DEFAULT_SETTINGS: Settings = { provider: 'codex', model: '', interests: '', batchSize: 4, tutorMode: 'reflective' };
+export const DEFAULT_SETTINGS: Settings = { provider: 'codex', model: '', interests: '', batchSize: DEFAULT_LESSON_SIZE, tutorMode: 'reflective' };
 
 export function parseSettings(input: unknown): Settings {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError('Choose valid tutor settings.');
@@ -15,7 +16,7 @@ export function parseSettings(input: unknown): Settings {
   if (!['codex', 'opencode', 'demo'].includes(data.provider)) throw new AppError('Choose Codex, OpenCode, or practice demo.');
   if (typeof data.model !== 'string' || data.model.length > 160 || !/^[\w./:-]*$/.test(data.model) || data.model.startsWith('-')) throw new AppError('Enter a model name, or leave it blank for the CLI default.');
   if (typeof data.interests !== 'string' || data.interests.length > 2000) throw new AppError('Keep interests under 2,000 characters.');
-  if (![4, 6, 8].includes(data.batchSize)) throw new AppError('Choose 4, 6, or 8 exercises per lesson.');
+  if (!LESSON_SIZES.some(size => size === data.batchSize)) throw new AppError('Choose 6, 8, or 12 exercises per lesson.');
   if (!['reflective', 'baseline'].includes(data.tutorMode)) throw new AppError('Choose reflective or baseline tutor mode.');
   return { provider: data.provider, model: data.model, interests: data.interests.trim(), batchSize: data.batchSize, tutorMode: data.tutorMode };
 }
@@ -64,6 +65,8 @@ export class LocalStore {
       try {
         this.data = JSON.parse(readFileSync(this.file, 'utf8'));
         if (this.data.version !== 1 || !Array.isArray(this.data.lessons) || !Array.isArray(this.data.attempts)) throw new Error('Unsupported data format.');
+        // Retire the old four-card setting without changing any sealed lesson.
+        if (this.data.settings?.batchSize === 4) this.data.settings = { ...this.data.settings, batchSize: DEFAULT_LESSON_SIZE };
         this.data.settings = parseSettings(this.data.settings);
         this.data.feedback ??= [];
         this.data.reviewSessions ??= [];

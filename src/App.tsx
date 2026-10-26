@@ -5,10 +5,11 @@ import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
 import type { Answer, AppState, Discussion, Hypothesis, Job, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
 import { flushReviewSessions, useAnswerClock, useReviewSync, useReviewTiming } from './ui';
+import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from './lesson-sizes';
 
 hljs.registerLanguage('javascript', javascript);
 const PROVIDER_NAMES: Record<ProviderId, string> = { codex: 'Codex', opencode: 'OpenCode', demo: 'Practice demo' };
-const defaults: Settings = { provider: 'demo', model: '', interests: '', batchSize: 4, tutorMode: 'reflective' };
+const defaults: Settings = { provider: 'demo', model: '', interests: '', batchSize: DEFAULT_LESSON_SIZE, tutorMode: 'reflective' };
 const percent = (value: number | null) => value === null ? '—' : `${Math.round(value * 100)}%`;
 const date = (value: string) => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const json = (value: unknown) => JSON.stringify(value, null, 2);
@@ -244,7 +245,7 @@ function SettingsPanel({ state, settings, setSettings, onSave, pending }: { stat
     <div className="provider-status" role="status"><span className={`status-dot ${selected?.available ? '' : 'offline'}`} /><div><strong>{settings.provider === 'demo' ? 'Ready to try' : selected?.available ? 'Installed · login separately' : 'Not detected'}</strong><p>{selected?.detail || 'Provider information unavailable.'}</p>{selected?.version && <code>{selected.version}</code>}</div></div>
     {settings.provider !== 'demo' && <><label htmlFor="model">Model <span className="label-note">optional</span></label><input id="model" value={settings.model} placeholder="Use the agent’s default model" onChange={(event) => setSettings({ ...settings, model: event.target.value })} /><p className="field-help">Use a model name your selected agent supports. Authenticate in its CLI before starting a lesson.</p></>}
     <label htmlFor="interests">What would you like to get better at?</label><textarea id="interests" data-testid="interests-input" rows={4} value={settings.interests} onChange={(event) => setSettings({ ...settings, interests: event.target.value })} placeholder="For example: JavaScript array logic, edge cases in data pipelines, and code I might see in interviews." /><p className="field-help">Plain language is enough. Lessons use small, executable JavaScript functions.</p>
-    <fieldset><legend>Cards per lesson</legend><div className="segmented">{[4, 6, 8].map((size) => <button key={size} type="button" className={settings.batchSize === size ? 'selected' : ''} onClick={() => setSettings({ ...settings, batchSize: size })} aria-pressed={settings.batchSize === size}>{size} cards</button>)}</div></fieldset>
+    <fieldset><legend>Cards per lesson</legend><div className="segmented">{LESSON_SIZES.map((size) => <button key={size} type="button" className={settings.batchSize === size ? 'selected' : ''} onClick={() => setSettings({ ...settings, batchSize: size })} aria-pressed={settings.batchSize === size}>{size} cards</button>)}</div></fieldset>
     <details className="plain-details"><summary>Experimental comparison</summary><label htmlFor="tutor-mode">Tutor mode</label><select id="tutor-mode" value={settings.tutorMode} onChange={(event) => setSettings({ ...settings, tutorMode: event.target.value as Settings['tutorMode'] })}><option value="reflective">Reflective tutor</option><option value="baseline">Baseline · experimental</option></select><p className="field-help">Reflective mode asks the tutor to revisit its hypotheses using prior answers. Baseline offers a comparison without that reflection. Neither is evidence of improved learning.</p></details>
     <div className="form-footer"><span className="fine-print">{dirty ? 'Unsaved changes' : 'Settings saved locally'}</span><button className="button primary" type="submit" disabled={pending || !dirty} data-testid="save-settings">{pending ? <LoaderCircle size={17} className="spin" /> : <Check size={17} />} Save settings</button></div>
     {state.currentLesson && !state.currentLesson.complete && <p className="fine-print">Changes apply to your next lesson. Your current lesson stays saved.</p>}

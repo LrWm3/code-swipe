@@ -1,5 +1,6 @@
 import { getQuickJS } from 'quickjs-emscripten';
 import type { JsonValue, ProposedLesson, TutorContext, ValidationReport } from '../src/types.ts';
+import { LESSON_SIZES } from '../src/lesson-sizes.ts';
 
 const MAX_PAYLOAD = 180_000;
 const MAX_VALUE = 16_000;
@@ -128,7 +129,7 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
     string(hypothesis.nextProbe, `${path}.nextProbe`, 1_000);
   }
   const batchSize = context.settings.batchSize;
-  if (![4, 6, 8].includes(batchSize)) reject('settings.batchSize', 'must be 4, 6, or 8.');
+  if (!LESSON_SIZES.some(size => size === batchSize)) reject('settings.batchSize', 'must be 6, 8, or 12.');
   const questions = list(lesson.questions, 'questions', batchSize, batchSize);
   const unique = { title: new Set<string>(), code: new Set<string>() };
   for (let i = 0; i < questions.length; i++) {

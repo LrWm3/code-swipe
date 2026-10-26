@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createDemoLesson } from '../server/demo.ts';
 import { validateLesson } from '../server/validation.ts';
+import { DEFAULT_LESSON_SIZE } from '../src/lesson-sizes.ts';
 import type { Lesson, ProposedLesson, TutorContext } from '../src/types.ts';
 
-function context(batchSize = 4): TutorContext {
+function context(batchSize = DEFAULT_LESSON_SIZE): TutorContext {
   return {
     settings: { provider: 'demo', model: '', interests: '', batchSize, tutorMode: 'reflective' },
     history: [],
@@ -16,7 +17,7 @@ function context(batchSize = 4): TutorContext {
 function lesson(): ProposedLesson { return createDemoLesson(context()); }
 
 test('given curated sample lessons, when validating every batch size, then correct code passes and buggy code has exact counterexamples', async () => {
-  for (const count of [4, 6, 8]) {
+  for (const count of [6, 8, 12]) {
     const tutor = context(count);
     const proposal = createDemoLesson(tutor);
     const validated = await validateLesson(proposal, tutor);
@@ -86,7 +87,7 @@ test('given excessive allocation, when the sandbox memory limit is reached, then
   proposal.questions[0].code = 'function solve(input) { return new Array(10000000).fill(1); }';
   await assert.rejects(validateLesson(proposal, context()), /resource limit|timed out/);
   const healthy = await validateLesson(lesson(), context());
-  assert.equal(healthy.reports.length, 4, 'A rejected allocation must not corrupt later sandbox runs.');
+  assert.equal(healthy.reports.length, DEFAULT_LESSON_SIZE, 'A rejected allocation must not corrupt later sandbox runs.');
 });
 
 test('given code that inspects host capabilities, when evaluated inside WASM, then filesystem process and network APIs are absent', async () => {
@@ -143,7 +144,7 @@ test('given incomplete or coercible schema values, when validating structure, th
     { edit: p => { delete p.questions[0].referenceCode; }, expected: /referenceCode: is required/ },
     { edit: p => { p.questions[0].verdict = 'probably'; }, expected: /must be one of/ },
     { edit: p => { p.questions[0].tests.pop(); }, expected: /4–12 entries/ },
-    { edit: p => { p.questions.pop(); }, expected: /4–4 entries/ },
+    { edit: p => { p.questions.pop(); }, expected: new RegExp(`${DEFAULT_LESSON_SIZE}–${DEFAULT_LESSON_SIZE} entries`) },
     { edit: p => { p.extra = true; }, expected: /not an allowed field/ },
     { edit: p => { p.questions[0].hypothesisId = 'missing'; }, expected: /reference a hypothesis/ },
     { edit: p => { p.questions[0].tests[1].input = []; }, expected: /duplicates an existing fixture/ },

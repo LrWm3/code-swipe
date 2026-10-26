@@ -1,4 +1,5 @@
 import type { ProposedLesson, TutorContext } from '../src/types.ts';
+import { LESSON_SIZES } from '../src/lesson-sizes.ts';
 
 type Schema = {
   type?: string | string[];
@@ -38,7 +39,7 @@ export const lessonOutputSchema = object({
     hypothesisId: { type: ['string', 'null'], minLength: 1, maxLength: 80, pattern: '^[a-zA-Z][a-zA-Z0-9_-]*$' },
     ifCorrect: text(), ifIncorrect: text(),
     prediction: object({ pCorrect: { type: 'number', minimum: 0, maximum: 1 }, rationale: text() }),
-  }), 8, 1),
+  }), Math.max(...LESSON_SIZES), 1),
 });
 
 export function lessonSchemaForBatch(batchSize: number): Schema {
