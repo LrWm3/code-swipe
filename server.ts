@@ -39,7 +39,15 @@ export function createApp(service: TutorService) {
   });
   app.post('/api/attempts/:id/flag', (req, res) => {
     service.requireIdle();
-    service.store.flagAttempt(req.params.id, req.body?.flagged);
+    service.store.flagAttempt(req.params.id, req.body?.flagged, req.body?.reason);
+    res.json(service.state());
+  });
+  app.post('/api/attempts/:id/review', (req, res) => {
+    res.json({ session: service.store.recordReview(req.params.id, req.body) });
+  });
+  app.post('/api/lessons/:id/feedback', (req, res) => {
+    service.requireIdle();
+    service.store.saveFeedback(req.params.id, req.body);
     res.json(service.state());
   });
   app.get('/api/export', (_req, res) => {

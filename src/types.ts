@@ -1,5 +1,6 @@
 export type ProviderId = 'codex' | 'opencode' | 'demo';
 export type Verdict = 'buggy' | 'correct';
+export type Answer = Verdict | 'idk';
 export type Purpose = 'diagnostic' | 'practice' | 'transfer' | 'retention';
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -63,17 +64,34 @@ export interface Attempt {
   id: string;
   lessonId: string;
   exerciseId: string;
-  answer: Verdict;
-  correct: boolean;
+  answer: Answer;
+  correct: boolean | null;
   answeredAt: string;
   elapsedMs: number;
   flagged: boolean;
+  exclusionReason?: 'accidental-input' | 'flawed-question';
+}
+export interface ReviewSession {
+  id: string;
+  attemptId: string;
+  openedAt: string;
+  updatedAt: string;
+  activeMs: number;
+  closed: boolean;
+}
+export interface LessonFeedback {
+  lessonId: string;
+  text: string;
+  accidentalAttemptIds: string[];
+  updatedAt: string;
 }
 export interface StoreData {
   version: 1;
   settings: Settings;
   lessons: Lesson[];
   attempts: Attempt[];
+  reviewSessions?: ReviewSession[];
+  feedback?: LessonFeedback[];
 }
 export interface ProviderStatus { id: ProviderId; available: boolean; version: string; detail: string }
 export interface TutorContext {
@@ -81,6 +99,8 @@ export interface TutorContext {
   history: { lesson: Lesson; attempts: Attempt[] }[];
   hypotheses: Hypothesis[];
   metrics: Metrics;
+  reviewSessions?: ReviewSession[];
+  feedback?: LessonFeedback[];
   repair?: string[];
   draft?: ProposedLesson;
 }
@@ -128,6 +148,7 @@ export interface LessonSummary {
   assumptions: string[];
   hypotheses: Hypothesis[];
   predictionHash: string;
+  feedback?: LessonFeedback;
 }
 export interface AppState {
   settings: Settings;
@@ -140,4 +161,6 @@ export interface AppState {
   hypotheses: Hypothesis[];
   metrics: Metrics;
   dataDirectory: string;
+  reviewSessions: ReviewSession[];
+  feedback: LessonFeedback[];
 }

@@ -9,6 +9,7 @@ type CliProvider = Exclude<ProviderId, 'demo'>;
 type RunOptions = { cwd: string; env: NodeJS.ProcessEnv; signal?: AbortSignal; input?: string; timeout: number; maxBytes?: number };
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_LESSON_BYTES = 512 * 1024;
+const MIN_CODEX_VERSION = [0, 153, 4] as const;
 
 function binary(provider: CliProvider): string {
   return process.env[provider === 'codex' ? 'CODE_SWIPE_CODEX_BIN' : 'CODE_SWIPE_OPENCODE_BIN'] || provider;
@@ -99,35 +100,83 @@ async function runCli(provider: CliProvider, args: string[], options: RunOptions
         ? `${provider} CLI was not found. Install it, add it to PATH, or set CODE_SWIPE_${provider.toUpperCase()}_BIN.`
         : `${provider} could not start. Check its executable path and permissions.`));
     });
-    child.once('close', code => {
+    child.once('close', (code, signal) => {
       // Stop descendants too; temporary files and processes belong to this run.
       signalProcessGroup(child, 'SIGKILL');
-      finish(failure ?? (code === 0 ? undefined : cliFailure(provider, `${stderr}\n${stdout}`)));
+      const events = cliEventFailures(stdout);
+      finish(failure ?? (code === 0 && !events.failed ? undefined : cliFailure(provider, `${stderr}\n${events.diagnostics}`, { code, signal })));
     });
     child.stdin.end(options.input ?? '');
   });
 }
 
-function cliFailure(provider: CliProvider, diagnostics: string): Error {
-  // Never put CLI logs in an API error: they may contain prompts or credentials.
-  if (/unauthori[sz]ed|unauthenticated|not logged in|authentication|auth(?:entication)?[_ -]?(?:error|required)|invalid.{0,15}(?:api.?key|token)|401|login required|sign.?in/i.test(diagnostics)) {
-    return new Error(`${provider} needs authentication. Run "${provider === 'codex' ? 'codex login' : 'opencode auth login'}" in your terminal, then retry.`);
+function cliEventFailures(stdout: string): { diagnostics: string; failed: boolean } {
+  const diagnostics: string[] = [];
+  let failed = false;
+  for (const line of stdout.split('\n')) {
+    let event: Record<string, unknown>;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (!event || typeof event !== 'object') continue;
+    if (event.type === 'turn.completed') {
+      // A successful retry supersedes an earlier stream error.
+      diagnostics.length = 0;
+      failed = false;
+    } else if (event.type === 'error' || event.type === 'turn.failed') {
+      diagnostics.push(JSON.stringify(event.error ?? event.message ?? ''));
+      failed = true;
+    }
+    // item.completed/type:error can be a nonfatal CLI configuration warning.
+    // Never classify agent_message text, which may echo untrusted lesson data.
   }
-  if (/429|rate.?limit|quota|usage.?limit|insufficient.?credit|billing/i.test(diagnostics)) return new Error(`${provider} reached a usage or rate limit. Wait, check your account, or choose another provider/model.`);
-  if (/model.{0,50}(?:not found|not supported|does not exist|unavailable)|(?:unknown|invalid|unsupported).{0,20}model|ModelNotFound/i.test(diagnostics)) return new Error(`${provider} could not use that model. Check the model name or clear it to use the CLI default.`);
-  if (/unknown (?:argument|option)|unexpected argument|unrecognized option/i.test(diagnostics)) return new Error(`${provider} does not support the required CLI options. Update the CLI and retry.`);
-  return new Error(`${provider} could not complete the lesson. Check CLI sign-in, network access, and model availability, then retry.`);
+  return { diagnostics: diagnostics.join('\n'), failed };
+}
+
+function cliFailure(provider: CliProvider, diagnostics: string, exit?: { code: number | null; signal: NodeJS.Signals | null }): Error {
+  // Emit only fixed diagnostic vocabulary and process status. Even redacted
+  // log excerpts can expose prompt/history text or unfamiliar credential forms.
+  const status = !exit || exit.code === 0 ? '' : exit.signal ? ` (${exit.signal})` : ` (exit ${exit.code ?? 'unknown'})`;
+  const failure = (message: string) => new Error(`${provider}${status} ${message}`);
+  if (/invalid_json_schema|invalid schema|schema.{0,80}(?:not supported|unsupported|invalid)|(?:not supported|unsupported).{0,80}schema/i.test(diagnostics)) {
+    const bound = diagnostics.match(/\b(?:minItems|maxItems|minLength|maxLength|additionalProperties|required|pattern)\b/)?.[0];
+    return failure(`rejected the lesson output schema${bound ? ` (${bound})` : ''}. This is a structured-output compatibility error; update the app or choose another provider/model.`);
+  }
+  if (/unknown (?:argument|option)|unexpected argument|unrecognized option|unknown feature|unrecognized feature/i.test(diagnostics)) return failure('does not support a required CLI option or feature. Update the CLI and retry.');
+  if (/error (?:loading|parsing) config|failed to (?:load|parse) config|invalid (?:configuration|config)|configuration error|TOML parse error/i.test(diagnostics)) return failure('could not load its CLI configuration. Check the CLI installation and configuration syntax.');
+  if (/unauthori[sz]ed|unauthenticated|not logged in|authentication|auth(?:entication)?[_ -]?(?:error|required)|invalid.{0,15}(?:api.?key|token)|401|login required|sign.?in/i.test(diagnostics)) {
+    return failure(`needs authentication. Run "${provider === 'codex' ? 'codex login' : 'opencode auth login'}" in your terminal, then retry.`);
+  }
+  if (/429|rate.?limit|quota|usage.?limit|insufficient.?credit|billing/i.test(diagnostics)) return failure('reached a usage or rate limit. Wait, check your account, or choose another provider/model.');
+  if (/model.{0,50}(?:not found|not supported|does not exist|unavailable)|(?:unknown|invalid|unsupported).{0,20}model|ModelNotFound/i.test(diagnostics)) return failure('could not use that model. Check the model name or clear it to use the CLI default.');
+  if (/403|forbidden|access.?denied|permission.?denied/i.test(diagnostics)) return failure('reported an access or permission denial. Check account access and local CLI permissions.');
+  if (/ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|connection (?:refused|reset|closed)|network (?:error|unreachable)|error sending request|stream (?:disconnected|closed)|TLS|certificate/i.test(diagnostics)) return failure('lost its network connection to the model service. Check connectivity and retry.');
+  if (/\b50[0234]\b|service unavailable|server error|overloaded/i.test(diagnostics)) return failure('reported a model service error. Retry after a short wait.');
+  return failure('stopped without a recognized failure reason. Retry generation; if it repeats, check the CLI installation. No raw CLI logs are exposed.');
+}
+
+async function cliVersion(provider: CliProvider, directory: string, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<string> {
+  const output = await runCli(provider, ['--version'], { cwd: directory, env, signal, timeout: 5_000, maxBytes: 16_384 });
+  const version = `${output.stdout}\n${output.stderr}`.match(/\b\d+\.\d+\.\d+(?:[-+][\w.-]+)?\b/)?.[0];
+  if (!version) throw new Error(`${provider} did not report a version. Check its installation.`);
+  return version;
+}
+
+function requireSupportedCodex(version: string): void {
+  const parts = version.split(/[.+-]/).slice(0, 3).map(Number);
+  const comparison = parts.map((part, index) => part - MIN_CODEX_VERSION[index]).find(value => value !== 0) ?? 0;
+  if (comparison < 0) {
+    throw new Error(`Codex CLI ${version} is too old for isolated lesson generation. Version ${MIN_CODEX_VERSION.join('.')} or newer is required. Update Codex or set CODE_SWIPE_CODEX_BIN to a supported installation; its path may differ from your terminal's CLI.`);
+  }
 }
 
 export async function detectProviders(): Promise<ProviderStatus[]> {
   const statuses = await Promise.all((['codex', 'opencode'] as const).map(async id => {
+    let version = '';
     try {
-      const output = await runCli(id, ['--version'], { cwd: tmpdir(), env: isolatedEnvironment(tmpdir()), timeout: 5_000, maxBytes: 16_384 });
-      const version = `${output.stdout}\n${output.stderr}`.match(/\b\d+\.\d+\.\d+(?:[-+][\w.-]+)?\b/)?.[0];
-      if (!version) throw new Error(`${id} did not report a version. Check its installation.`);
+      version = await cliVersion(id, tmpdir(), isolatedEnvironment(tmpdir()));
+      if (id === 'codex') requireSupportedCodex(version);
       return { id, available: true, version, detail: 'Installed. Authentication and model access are checked during generation.' };
     } catch (error) {
-      return { id, available: false, version: '', detail: (error as Error).message };
+      return { id, available: false, version, detail: (error as Error).message };
     }
   }));
   return [...statuses, { id: 'demo', available: true, version: '1', detail: 'Local examples. No CLI, account, or model request required.' }];
@@ -169,6 +218,9 @@ export async function generateLesson(context: TutorContext, options: { signal: A
   const directory = await mkdtemp(join(tmpdir(), 'code-swipe-tutor-'));
   try {
     const env = isolatedEnvironment(directory);
+    // Older CLIs reject isolation features before making a request. Never
+    // silently drop those protections just to make generation start.
+    if (provider === 'codex') requireSupportedCodex(await cliVersion(provider, directory, env, options.signal));
     const prompt = buildTutorPrompt(context);
     if (Buffer.byteLength(prompt) > 512 * 1024) throw new Error('Tutor history is too large for one request. Reduce saved history before retrying.');
     options.onProgress(`Waiting for ${provider} to plan and check the lesson…`);

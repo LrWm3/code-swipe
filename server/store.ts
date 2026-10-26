@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync, chmodSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import type { AppState, Attempt, Lesson, LessonSummary, Metrics, ProposedLesson, ProviderStatus, Review, Settings, StoreData, TutorContext, ValidationReport, Verdict, Job } from '../src/types.ts';
+import type { AppState, Attempt, Lesson, LessonSummary, Metrics, ProposedLesson, ProviderStatus, Review, ReviewSession, LessonFeedback, Settings, StoreData, TutorContext, ValidationReport, Answer, Job } from '../src/types.ts';
 
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -25,7 +25,7 @@ export function lessonHash(lesson: Lesson): string {
 }
 
 export function calculateMetrics(data: StoreData, filter?: Pick<Settings, 'provider' | 'tutorMode'>): Metrics {
-  const observations = data.attempts.filter(attempt => !attempt.flagged).flatMap(attempt => {
+  const observations = data.attempts.filter(attempt => !attempt.flagged && attempt.answer !== 'idk' && typeof attempt.correct === 'boolean').flatMap(attempt => {
     const lesson = data.lessons.find(item => item.id === attempt.lessonId);
     if (!lesson || (filter && (lesson.provider !== filter.provider || lesson.tutorMode !== filter.tutorMode))) return [];
     const question = lesson.questions.find(item => item.id === attempt.exerciseId);
@@ -64,6 +64,9 @@ export class LocalStore {
         this.data = JSON.parse(readFileSync(this.file, 'utf8'));
         if (this.data.version !== 1 || !Array.isArray(this.data.lessons) || !Array.isArray(this.data.attempts)) throw new Error('Unsupported data format.');
         this.data.settings = parseSettings(this.data.settings);
+        this.data.feedback ??= [];
+        this.data.reviewSessions ??= [];
+        if (!Array.isArray(this.data.feedback) || !Array.isArray(this.data.reviewSessions)) throw new Error('Invalid feedback history.');
         for (const lesson of this.data.lessons) {
           if (lesson.predictionHash !== lessonHash(lesson)) throw new Error('A committed lesson has changed.');
           const artifact = JSON.parse(readFileSync(join(this.directory, 'plans', `${lesson.id}.json`), 'utf8')) as Lesson;
@@ -73,7 +76,7 @@ export class LocalStore {
         throw new Error(`Could not read local history at ${this.file}. Nothing was reset. Check state.backup.json and restore a matching set of plan files. ${error instanceof Error ? error.message : ''}`);
       }
     } else {
-      this.data = { version: 1, settings: { ...DEFAULT_SETTINGS }, lessons: [], attempts: [] };
+      this.data = { version: 1, settings: { ...DEFAULT_SETTINGS }, lessons: [], attempts: [], feedback: [], reviewSessions: [] };
       this.persist();
     }
   }
@@ -123,8 +126,8 @@ export class LocalStore {
     return structuredClone(lesson);
   }
 
-  answer(exerciseId: string, answer: Verdict, elapsedMs: number): Review {
-    if (!['buggy', 'correct'].includes(answer)) throw new AppError('Choose buggy or correct.');
+  answer(exerciseId: string, answer: Answer, elapsedMs: number): Review {
+    if (!['buggy', 'correct', 'idk'].includes(answer)) throw new AppError('Choose buggy, correct, or IDK.');
     if (typeof exerciseId !== 'string' || !Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > 86_400_000) throw new AppError('Invalid exercise response.');
     const existing = this.data.attempts.find(item => item.exerciseId === exerciseId);
     if (existing) {
@@ -135,15 +138,66 @@ export class LocalStore {
     if (!current || current.id !== exerciseId) throw new AppError('This exercise is no longer current. Refresh to continue.', 409);
     const lesson = this.data.lessons.at(-1)!;
     const attempt: Attempt = { id: randomUUID(), lessonId: lesson.id, exerciseId, answer,
-      correct: answer === current.verdict, answeredAt: new Date().toISOString(), elapsedMs: Math.round(elapsedMs), flagged: false };
+      correct: answer === 'idk' ? null : answer === current.verdict, answeredAt: new Date().toISOString(), elapsedMs: Math.round(elapsedMs), flagged: false };
     this.update({ ...this.data, attempts: [...this.data.attempts, attempt] });
     return this.review(attempt);
   }
 
-  flagAttempt(id: string, flagged: boolean) {
+  flagAttempt(id: string, flagged: boolean, reason: Attempt['exclusionReason'] = 'flawed-question') {
     if (typeof flagged !== 'boolean') throw new AppError('Choose whether this exercise should be excluded.');
+    if (!['flawed-question', 'accidental-input'].includes(reason)) throw new AppError('Choose a valid reason for excluding this answer.');
     if (!this.data.attempts.some(item => item.id === id)) throw new AppError('Answer not found.', 404);
-    this.update({ ...this.data, attempts: this.data.attempts.map(item => item.id === id ? { ...item, flagged } : item) });
+    this.update({ ...this.data,
+      attempts: this.data.attempts.map(item => item.id === id ? { ...item, flagged,
+        exclusionReason: !flagged ? undefined : reason === 'accidental-input' && item.flagged && item.exclusionReason !== 'accidental-input' ? 'flawed-question' : reason } : item),
+      feedback: (this.data.feedback ?? []).map(item => {
+        const belongs = this.data.attempts.some(attempt => attempt.id === id && attempt.lessonId === item.lessonId);
+        return { ...item, accidentalAttemptIds: flagged && reason === 'accidental-input' && belongs
+          ? [...new Set([...item.accidentalAttemptIds, id])] : item.accidentalAttemptIds.filter(attemptId => attemptId !== id) };
+      }),
+    });
+  }
+
+  recordReview(attemptId: string, input: unknown): ReviewSession {
+    if (!this.data.attempts.some(item => item.id === attemptId)) throw new AppError('Answer not found.', 404);
+    if (!input || typeof input !== 'object') throw new AppError('Send a valid review session.');
+    const { sessionId, activeMs, closed, openedAt } = input as { sessionId: string; activeMs: number; closed: boolean; openedAt?: string };
+    if (typeof sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) throw new AppError('Use a valid review session ID.');
+    if (typeof activeMs !== 'number' || !Number.isFinite(activeMs) || activeMs < 0 || activeMs > 86_400_000 || typeof closed !== 'boolean') throw new AppError('Review duration must be between zero and 24 hours.');
+    if (openedAt !== undefined && (typeof openedAt !== 'string' || !Number.isFinite(Date.parse(openedAt)))) throw new AppError('Use a valid review opening timestamp.');
+    const sessions = this.data.reviewSessions ?? [];
+    const previous = sessions.find(item => item.id === sessionId);
+    if (previous && previous.attemptId !== attemptId) throw new AppError('This review session belongs to another answer.', 409);
+    if (!previous && activeMs !== 0) throw new AppError('Open a review session before recording its duration.', 409);
+    if (previous && activeMs <= previous.activeMs && (!closed || previous.closed)) return structuredClone(previous);
+    const now = new Date().toISOString();
+    const session: ReviewSession = { id: sessionId, attemptId, openedAt: previous?.openedAt ?? (openedAt ? new Date(openedAt).toISOString() : now),
+      updatedAt: now, activeMs: Math.max(previous?.activeMs ?? 0, Math.round(activeMs)), closed: closed || previous?.closed || false };
+    this.update({ ...this.data, reviewSessions: previous ? sessions.map(item => item.id === sessionId ? session : item) : [...sessions, session] });
+    return structuredClone(session);
+  }
+
+  saveFeedback(lessonId: string, input: unknown) {
+    const lesson = this.data.lessons.find(item => item.id === lessonId);
+    if (!lesson) throw new AppError('Lesson not found.', 404);
+    const attempts = this.data.attempts.filter(item => item.lessonId === lessonId);
+    if (attempts.length !== lesson.questions.length) throw new AppError('Finish this lesson before leaving feedback.', 409);
+    if (!input || typeof input !== 'object') throw new AppError('Send valid lesson feedback.');
+    const { text, accidentalAttemptIds } = input as { text: string; accidentalAttemptIds: string[] };
+    if (typeof text !== 'string' || text.length > 4_000) throw new AppError('Keep feedback under 4,000 characters.');
+    if (!Array.isArray(accidentalAttemptIds) || accidentalAttemptIds.length > lesson.questions.length || accidentalAttemptIds.some(id => typeof id !== 'string' || !attempts.some(item => item.id === id))) throw new AppError('Accidental answers must belong to this lesson.');
+    const excluded = new Set(accidentalAttemptIds);
+    const feedback: LessonFeedback = { lessonId, text: text.trim(), accidentalAttemptIds: [...excluded], updatedAt: new Date().toISOString() };
+    this.update({ ...this.data,
+      feedback: [...(this.data.feedback ?? []).filter(item => item.lessonId !== lessonId), feedback],
+      attempts: this.data.attempts.map(item => {
+        if (item.lessonId !== lessonId) return item;
+        // Accident notes must not erase an independently flagged bad exercise.
+        if (excluded.has(item.id)) return item.flagged && item.exclusionReason !== 'accidental-input' ? item : { ...item, flagged: true, exclusionReason: 'accidental-input' };
+        if (item.exclusionReason === 'accidental-input') return { ...item, flagged: false, exclusionReason: undefined };
+        return item;
+      }),
+    });
   }
 
   private review(attempt: Attempt): Review {
@@ -155,7 +209,7 @@ export class LocalStore {
   context(): TutorContext {
     const history = this.data.lessons.map(lesson => ({ lesson, attempts: this.data.attempts.filter(item => item.lessonId === lesson.id && !item.flagged) }));
     if (this.data.settings.tutorMode === 'baseline') {
-      return { settings: { ...this.data.settings }, history: [], hypotheses: [], metrics: calculateMetrics({ ...this.data, lessons: [], attempts: [] }) };
+      return { settings: { ...this.data.settings }, history: [], hypotheses: [], reviewSessions: [], feedback: [], metrics: calculateMetrics({ ...this.data, lessons: [], attempts: [] }) };
     }
     const hypotheses = this.data.lessons.at(-1)?.hypotheses ?? [];
     const evidence = new Set(hypotheses.flatMap(item => [...item.supportingAttemptIds, ...item.counterevidenceAttemptIds]));
@@ -164,7 +218,10 @@ export class LocalStore {
     // Evidence dropped from the context is also removed from current hypotheses.
     while (selected.length > 1 && Buffer.byteLength(JSON.stringify(selected)) > 280_000) selected.shift();
     const knownIds = new Set(selected.flatMap(item => item.attempts.map(attempt => attempt.id)));
+    const knownLessons = new Set(selected.map(item => item.lesson.id));
     return { settings: { ...this.data.settings }, history: structuredClone(selected),
+      feedback: structuredClone((this.data.feedback ?? []).filter(item => knownLessons.has(item.lessonId))),
+      reviewSessions: structuredClone((this.data.reviewSessions ?? []).filter(item => knownIds.has(item.attemptId))),
       hypotheses: hypotheses.map(item => {
         const supportingAttemptIds = item.supportingAttemptIds.filter(id => knownIds.has(id));
         const counterevidenceAttemptIds = item.counterevidenceAttemptIds.filter(id => knownIds.has(id));
@@ -185,7 +242,8 @@ export class LocalStore {
       return { id: lesson.id, objective: lesson.objective, rationale: complete ? lesson.rationale : 'The tutor’s rationale is sealed until this lesson is complete, so it cannot give away the answers.', createdAt: lesson.createdAt,
         provider: lesson.provider, tutorMode: lesson.tutorMode, answered, total: lesson.questions.length, complete,
         reflection: complete ? lesson.reflection : null, assumptions: complete ? lesson.assumptions : [],
-        hypotheses: complete ? lesson.hypotheses : [], predictionHash: lesson.predictionHash };
+        hypotheses: complete ? lesson.hypotheses : [], predictionHash: lesson.predictionHash,
+        feedback: this.data.feedback?.find(item => item.lessonId === lesson.id) };
     });
     const current = this.pendingQuestion();
     return structuredClone({ settings: this.data.settings, providers, job,
@@ -194,6 +252,7 @@ export class LocalStore {
         purpose: current.purpose, testCount: current.validation.testCount } : null,
       lessons: [...summaries].reverse(), reviews: [...this.data.attempts].reverse().map(item => this.review(item)),
       hypotheses: summaries.filter(item => item.complete).at(-1)?.hypotheses ?? [],
-      metrics: calculateMetrics(this.data, this.data.settings), dataDirectory: this.directory });
+      metrics: calculateMetrics(this.data, this.data.settings), dataDirectory: this.directory,
+      reviewSessions: this.data.reviewSessions ?? [], feedback: this.data.feedback ?? [] });
   }
 }
