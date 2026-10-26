@@ -1,6 +1,10 @@
 # Code Swipe
 
-Learn to read code and identify if it was implemented correctly or not. Over time problems become harder and attempt to match appropriate to your level of knowledge. 
+Read a coding problem, a corresponding solution and swipe left or right to identify if it was implemented correctly or not. 
+
+Over time problems become more difficult, are presented in unusual forms, and attempt to match to your level of demonstrated knowledge. 
+
+## Background
 
 This was a small project I made to explore this as an alternative idea for testing coding knowledge based on the ideas from [Using Erroneous Examples to Improve Mathematics Learning with a Web-Based Tutoring System (Adams et al., 2014).](https://www.cs.cmu.edu/~bmclaren/pubs/AdamsEtAl-UsingErrExToImproveMathLearningWithWebTutoringSys-CHB2014.pdf)
 
