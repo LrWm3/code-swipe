@@ -14,6 +14,8 @@ const date = (value: string) => new Date(value).toLocaleDateString(undefined, { 
 const json = (value: unknown) => JSON.stringify(value, null, 2);
 const answerLabel = (answer: Answer) => answer === 'idk' ? 'IDK' : answer === 'correct' ? 'Correct' : 'Buggy';
 const resultLabel = (correct: boolean | null) => correct === null ? 'IDK · ungraded' : correct ? 'Correct answer' : 'Incorrect answer';
+const quickResultLabel = (correct: boolean | null) => correct === null ? 'IDK · ungraded' : correct ? 'Correct!' : 'Incorrect';
+const resultTone = (correct: boolean | null) => correct === null ? 'neutral' : correct ? 'positive' : 'negative';
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Try again.';
 
 async function api<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
@@ -49,6 +51,16 @@ function Code({ code }: { code: string }) {
 
 function Badge({ children, tone = '' }: { children: React.ReactNode; tone?: string }) {
   return <span className={`badge ${tone}`}>{children}</span>;
+}
+
+function PreviousAnswer({ review, disabled, onReview }: { review: Review; disabled: boolean; onReview: () => void }) {
+  return <div className="previous-answer" data-testid="previous-answer" aria-label="Previous answer">
+    <span className={`answer-result ${resultTone(review.attempt.correct)}`}>
+      {review.attempt.correct === null ? <HelpCircle size={18} /> : review.attempt.correct ? <CheckCircle2 size={18} /> : <X size={18} />}
+      {quickResultLabel(review.attempt.correct)}
+    </span>
+    <button className="button compact quiet" onClick={onReview} disabled={disabled} data-testid="review-previous">Review previous<ChevronRight size={15} /></button>
+  </div>;
 }
 
 function Accountability({ metrics, settings }: { metrics: Metrics; settings: Settings }) {
@@ -248,6 +260,7 @@ export default function App() {
   const [connectionError, setConnectionError] = useState('');
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [lastReviewId, setLastReviewId] = useState<string | null>(null);
+  const [answerFeedback, setAnswerFeedback] = useState<{ id: string; correct: boolean | null } | null>(null);
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [drag, setDrag] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -271,7 +284,12 @@ export default function App() {
     setConnectionError('');
     if (uncertainAnswer.current) {
       const saved = next.reviews.find((item) => item.question.id === uncertainAnswer.current);
-      if (saved) { setLastReviewId(saved.attempt.id); uncertainAnswer.current = null; setError(''); }
+      if (saved) {
+        setLastReviewId(saved.attempt.id);
+        setAnswerFeedback({ id: saved.attempt.id, correct: saved.attempt.correct });
+        uncertainAnswer.current = null;
+        setError('');
+      }
     }
   }, []);
   const onReviewSaved = useCallback((session: ReviewSession) => {
@@ -322,6 +340,12 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [running]);
   useEffect(() => { pointer.current = null; setDrag(0); setDragging(false); }, [state?.question?.id, view, reviewId]);
+  useEffect(() => {
+    if (!answerFeedback) return;
+    const timer = window.setTimeout(() => setAnswerFeedback(null), 1700);
+    return () => window.clearTimeout(timer);
+  }, [answerFeedback?.id]);
+  useEffect(() => { setAnswerFeedback(null); }, [view, reviewId]);
   useEffect(() => { if (!reviewId) heading.current?.focus({ preventScroll: true }); }, [state?.question?.id, view]);
 
   const mutate = useCallback(async (name: string, operation: () => Promise<void>) => {
@@ -366,6 +390,7 @@ export default function App() {
     if (!state?.question || reviewId || view !== 'practice' || busy.current || connectionError) return;
     const question = state.question;
     const elapsedMs = Math.max(0, Math.round(readAnswerTime()));
+    setAnswerFeedback(null);
     uncertainAnswer.current = question.id;
     await mutate('answer', async () => {
       const result = await api<{ state: AppState; review: Review }>('/api/answers', 'POST', { exerciseId: question.id, answer, elapsedMs });
@@ -416,6 +441,7 @@ export default function App() {
   const lesson = state?.currentLesson || null;
   const changeView = (next: typeof view) => { setReviewId(null); setView(next); };
   const answerDisabled = Boolean(pending) || Boolean(connectionError) || Boolean(reviewId);
+  const previousAnswer = lastReview && !running ? <PreviousAnswer review={lastReview} disabled={Boolean(pending)} onReview={() => setReviewId(lastReview.attempt.id)} /> : null;
 
   return <div className={`app-shell view-${view}${view === 'practice' && state?.question ? ' has-active-card' : ''}`}>
     <header className="app-header"><button className="brand" onClick={() => changeView('practice')} aria-label="Code Swipe home"><span className="brand-mark"><Code2 size={24} /></span><span>code<span className="brand-light">swipe</span></span></button><nav aria-label="Main navigation">{([{ id: 'practice', label: 'Practice', icon: Code2 }, { id: 'notebook', label: 'Notebook', icon: BookOpen }, { id: 'settings', label: 'Setup', icon: Settings2 }] as const).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => changeView(id)} className={view === id ? 'active' : ''} aria-current={view === id ? 'page' : undefined}><Icon size={17} /><span>{label}</span></button>)}</nav><span className="local-status"><span className={`status-dot ${connectionError ? 'offline' : ''}`} />{connectionError ? 'Disconnected' : pending ? 'Saving…' : state ? 'Saved locally' : 'Connecting…'}</span></header>
@@ -431,6 +457,7 @@ export default function App() {
               {drag > 25 && <div className="swipe-stamp correct" data-testid="swipe-correct-overlay">CORRECT</div>}{drag < -25 && <div className="swipe-stamp buggy" data-testid="swipe-buggy-overlay">BUGGY</div>}
               <div className="exercise-intro"><div className="section-heading"><span className="small-label">Target objective</span><Badge>JavaScript</Badge></div><h1 ref={heading} tabIndex={-1}>{state.question.title}</h1><div className="specification"><p>{state.question.specification}</p></div></div><Code code={state.question.code} /><div className="card-footnote"><span>↔ Drag to decide</span><span>Buggy ← → Correct</span></div>
             </article></div>
+            {previousAnswer}
             <div className="answer-buttons"><button className="answer-button buggy" onClick={() => void submit('buggy')} disabled={answerDisabled} data-testid="answer-buggy"><X size={20} /><span>Buggy</span><kbd>←</kbd></button><button className="answer-button unsure" onClick={() => void submit('idk')} disabled={answerDisabled} data-testid="answer-idk" title="I don’t know · ungraded"><span>IDK</span><kbd>↓</kbd></button><button className="answer-button correct" onClick={() => void submit('correct')} disabled={answerDisabled} data-testid="answer-correct"><Check size={20} /><span>Correct</span><kbd>→</kbd></button></div>
             <p className="keyboard-hint" aria-live="polite">{pending === 'answer' ? 'Saving answer…' : 'Swipe, use arrow keys, or tap a button.'}</p>
           </> : running && !discussing && state.job ? <section className="panel planning-state" data-testid="planning-state"><div className="planning-icon"><Sparkles size={28} /></div><div className="eyebrow">{PROVIDER_NAMES[state.settings.provider]} is planning</div><h1 ref={heading} tabIndex={-1}>Preparing your lesson</h1><div className="job-stage" role="status"><LoaderCircle size={20} className="spin" /><div><strong>{state.job.stage}</strong><p>{state.job.message || 'Working on your next lesson…'}</p></div></div><p className="fine-print">Elapsed: {Math.max(0, Math.floor((now - Date.parse(state.job.startedAt)) / 1000))}s</p><button className="button quiet" onClick={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} disabled={Boolean(pending)} data-testid="cancel-plan"><X size={17} />{pending === 'cancel' ? 'Cancelling…' : 'Cancel planning'}</button></section>
@@ -440,9 +467,15 @@ export default function App() {
               {lesson?.complete ? <><div className="lesson-progress"><div><span className="eyebrow">Lesson {state.lessons.length}</span><span className="muted">Complete</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.total} data-testid="lesson-progress"><span style={{ width: '100%' }} /></div></div><LessonComplete key={lesson.id} lesson={lesson} reviews={state.reviews.filter((item) => item.attempt.lessonId === lesson.id)} discussion={state.discussions.filter(item => item.lessonId === lesson.id).at(-1)} job={state.job} pending={pending} canPlan={!connectionError && Boolean(chosenProvider?.available)} reflective={state.settings.tutorMode === 'reflective'} onSave={(draft) => void mutate('feedback', () => saveCompletion(draft))} onDiscuss={(draft) => void discussFeedback(draft)} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onNext={(draft) => void startLesson(false, draft)} onNotebook={() => { setSelectedLessonId(lesson.id); changeView('notebook'); }} /></>
                 : <section className="welcome-panel"><Code2 size={38} /><h1 ref={heading} tabIndex={-1}>Read code. Make a call.</h1><p className="welcome-copy">Swipe left for buggy. Right for correct. IDK when you’re unsure.</p><div className="welcome-actions"><button className="button primary" onClick={() => void startLesson(false)} disabled={Boolean(pending) || Boolean(connectionError) || !chosenProvider?.available} data-testid="start-lesson">{pending === 'start' ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{state.job?.status === 'error' ? 'Retry lesson' : 'Start lesson'}<ArrowRight size={18} /></button>{state.settings.provider !== 'demo' && <button className="button quiet" onClick={() => void startLesson(true)} disabled={Boolean(pending) || Boolean(connectionError)} data-testid="try-demo"><FlaskConical size={17} /> Try demo</button>}</div><div className="current-setup"><span>{PROVIDER_NAMES[state.settings.provider]} · {state.settings.batchSize} cards</span><button className="text-button" onClick={() => changeView('settings')}>Setup<ChevronRight size={14} /></button></div>{!chosenProvider?.available && <p className="fine-print">Set up your local agent, or try the demo.</p>}</section>}
             </>}
-          {lastReview && !running && <div className="previous-answer" data-testid="previous-answer"><span className={lastReview.attempt.correct === null ? 'neutral' : lastReview.attempt.correct ? 'positive' : 'negative'} role="status">{lastReview.attempt.correct === null ? <HelpCircle size={15} /> : lastReview.attempt.correct ? <Check size={15} /> : <X size={15} />}{resultLabel(lastReview.attempt.correct)}</span><button className="button compact quiet" onClick={() => setReviewId(lastReview.attempt.id)} disabled={Boolean(pending)} data-testid="review-previous">Review previous<ChevronRight size={15} /></button></div>}
+          {!state.question && previousAnswer}
         </div></div>}
     </main>
+    <div className="answer-feedback-position" role="status" aria-live="polite" aria-atomic="true">
+      {answerFeedback && view === 'practice' && !review && <div key={answerFeedback.id} className={`answer-feedback ${resultTone(answerFeedback.correct)}`} data-testid="answer-feedback">
+        {answerFeedback.correct === null ? <HelpCircle size={28} /> : answerFeedback.correct ? <CheckCircle2 size={28} /> : <X size={28} />}
+        <div><span>Previous answer</span><strong>{quickResultLabel(answerFeedback.correct)}</strong></div>
+      </div>}
+    </div>
     {review && <ReviewDialog key={review.attempt.id} review={review} pending={Boolean(pending) || running} error={error || connectionError} onFlag={flag} onClose={() => setReviewId(null)} />}
   </div>;
 }
