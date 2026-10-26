@@ -25,7 +25,7 @@ Elo problem matching systems tend to suffer from difficulty spikes, long periods
 
 Unfortunately, this means that while the system itself seems good at reinforcing individual concepts through a few different problem formulations, it struggles to actually present the right problems at the right time, limiting how effective I perceive it to be in its current form.
 
-Furthermore, `code-swipe` does not appropriately account for languages' surrounding ecosystem. There's more to python, javascript, java and rust than what comes with the language, but the system doesn't have a good way of gradually introducing those concepts over time yet. The vagueness in defining what a concept is in programming and when it should be introduced is less defined than well established field such as reading and mathematics.
+Furthermore, `code-swipe` does not appropriately account for languages' surrounding ecosystem. There's more to python, javascript, java and rust than what comes with the language, but the system doesn't have a good way of gradually introducing those concepts over time yet. The vagueness in defining what a concept is in programming and when it should be introduced is less defined than well established fields such as reading and mathematics.
 
 A better version might allow students to provide areas of interest and gradually introduce related dependencies over time, like `pandas`, `numpy`, `trt`, `torch`, `onnx` etc, if they are introduced in machine learning, as an example. Or perhaps it would surface those subjects autonomously and allow students to indicate their interest at that time.
 
@@ -35,7 +35,7 @@ There's also a more nebulous question about what it means for a student to have 
 
 Overall the `code-swipe` approach itself shows some promise, but the student problem matching problem prevents it from being effective as it exists today. It reproduces many of the discoveries made in [​Pelánek, R. (2016). Applications of the Elo rating system in adaptive educational systems. Computers & Education](https://doi.org/10.1016/j.compedu.2016.03.017).
 
-Recommendation for future work to further explore how to categories concepts, organize them meaningfully, determine student preferences, measure mastery, surface problems appropriately over time and personalized learning sessions. 
+Recommendation for future work to further explore how to categories concepts, organize them meaningfully, determine student preferences, measure mastery, surface problems appropriately over time and personalizing learning sessions. 
 
 ## Run it yourself 
 
