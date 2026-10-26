@@ -18,7 +18,7 @@ It works pretty well, but I don't like the elo system. The elo system is well un
 
 Elo problem matching systems tend to suffer from difficulty spikes, long periods of problems being too easy or rapidly becoming too hard, and connecting concepts to difficulty. I would say this project reproduces those problems. 
 
-There's plenty o research into different student problem matching systems. As mentioned before, elo is widely regarded as insufficient even for well defined concepts, and I personally regard software training full of vaguely connected concepts for which there is no well established order or cadence for learning outside of the basics.
+There's plenty of research into different student problem matching systems. As mentioned before, elo is widely regarded as insufficient even for well defined concepts. I personally regard software training full of vaguely connected concepts for which there is no well established order or cadence for learning outside of the basics.
 
 Student problem matching is still an area of active research, and there is no proven "best" way to do it, especially when you lack data or are bootstrapping a new system like `code-swipe` does. None of the ones I researched seemed like a good fit for this particular model without already operating at scale. 
 
