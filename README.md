@@ -1,49 +1,61 @@
-# Code Swipe
+# Code Swipe — local tutor lab
 
-Train your code review skills by reviewing code.
+Read a little JavaScript. Decide whether it's correct or buggy. See the counterexample, then let a tutor figure out what to try next.
 
-Read a coding problem and a code snippet that attempts to solve it, then swipe left or right to decide whether the solution meets the specification. Review incorrect answers, see what you missed, examine adversarially prepared problems, and improve over time.
+This branch rebuilds Code Swipe around a single teaching agent, powered by your installed **Codex** or **OpenCode** CLI. It keeps a notebook of tentative learner hypotheses, plans short lessons, and commits its predictions *before* you answer. Your answers shape the next lesson. No account system, Firebase, subjects, Elo, or mastery tree.
 
-Over time, problems become more difficult and appear in unusual forms. The system tries to match them to your demonstrated knowledge so you can keep learning without having to select each concept to master.
+## Try it
 
-## Demo
+Requires Node.js 22+ and npm. From this directory:
 
-![Code Swipe gameplay: swiping code cards and reviewing bug explanations](docs/assets/code-swipe-gameplay.gif)
+```sh
+npm ci
+npm run dev
+```
 
-## Background
+Open **http://127.0.0.1:3000**. Click **Try practice demo** for an instant, offline walkthrough, or use your signed-in CLI:
 
-This was a small project I made to explore an alternative way to test coding knowledge, inspired by [Using Erroneous Examples to Improve Mathematics Learning with a Web-Based Tutoring System (Adams et al., 2014)](https://www.cs.cmu.edu/~bmclaren/pubs/AdamsEtAl-UsingErrExToImproveMathLearningWithWebTutoringSys-CHB2014.pdf).
+```sh
+codex login
+# or
+opencode auth login
+```
 
-The project extends that idea slightly. Initial versions of problems are relatively straightforward. Later versions of the same problem use different programming styles, including imperative, functional, stream-based, and object-oriented approaches, to test whether the learning holds when the shape changes. Later problems also mix concepts to test the reader's ability to identify which part, if any, contains an error.
+Choose your provider in **Setup**, add any interests, and start a lesson. Leave the model blank for the CLI default, or enter a Codex model name / OpenCode `provider/model` identifier. Restart the server after installing a missing CLI. Tested with Codex 0.153.4 and OpenCode 1.17.13; older versions may need updating.
 
-Eventually, problems appear in an adversarial form, requiring careful reading of code you would rarely see in ordinary projects. This is intended to strengthen review skills beyond what a typical job would require.
+Use the buttons, left/right arrow keys, or the card's swipe handle. Feedback appears after each answer. Finish the batch, then start another lesson to have the tutor reflect on the results. Open **Notebook** to inspect its reasoning and committed predictions. Flag a flawed exercise to exclude that answer from future evidence and metrics.
 
-This core approach appears to work quite well in my own testing; I haven't performed any controlled studies. In particular, different representations of essentially the same problem seemed to help me learn the underlying rule instead of just recognizing the shape of the problem. Adversarially prepared problems also seemed to broaden my sense of the problems I might encounter, which felt useful.
+The demo uses curated examples and neutral predictions. It is not adaptive. For the actual experiment, switch to Codex or OpenCode.
 
-A weaker area is the Elo system. Learning involves moving from not understanding a concept to partially understanding it to understanding it well. Elo does not capture that progression well.
+## What this v1 does
 
-Elo-based problem matching tends to produce difficulty spikes, long stretches of problems that are too easy, or problems that become too hard too quickly. It also struggles to connect individual concepts to difficulty. I would say this project reproduces those problems.
+- Plans 4, 6, or 8 questions at a time, with explicit assumptions, alternative explanations, and predictions.
+- Runs each reference solution and candidate against generated fixtures inside QuickJS, with time and memory limits. Failed batches get one repair attempt before being rejected.
+- Saves immutable plan artifacts before showing a question. Answers append to local history; retries do not duplicate them.
+- Tracks Brier score and calibration separately for each provider and tutor mode. These measure prediction quality, not learning or mastery.
+- Offers a fresh-context baseline that gets the same generation and validation pipeline without learner history or persistent hypotheses.
 
-Unfortunately, while the system seems good at reinforcing individual concepts through a few different problem formulations, it struggles to present the right problems at the right time. That limits how effective I find it in its current form.
+Exercises are currently **pure, synchronous JavaScript functions** using JSON inputs and outputs. Tests are finite checks, not proofs: a generated specification, reference solution, or fixture can still be wrong. The flag button exists for that reason.
 
-Code Swipe also doesn't adequately account for the ecosystems surrounding programming languages. There's more to Python, JavaScript, Java, and Rust than what comes with the language, but the system doesn't yet have a good way to gradually introduce those broader concepts. What counts as a concept in programming, and when it should be introduced, seems less clearly defined than in well-established fields such as reading and mathematics.
+## Local data and model calls
 
-A better version might let students specify their interests and gradually introduce related libraries and tools. For someone interested in machine learning, for example, those might include `pandas`, `numpy`, `trt`, `torch`, and `onnx`. Or perhaps the system could introduce those subjects on its own and let students indicate their interest then.
+History lives in `.code-swipe/`, which Git ignores. The server listens on loopback only. Your browser needs no API key. Codex/OpenCode still sends lesson context to whichever model provider your CLI uses; those requests use your existing account and its normal limits or charges. “Local” describes the app and its storage, not necessarily inference.
 
-I also like having a defined session length, though ten problems a day seems arbitrary. More advanced platforms try to design sessions up front to balance engagement, desirable difficulty, and mental exhaustion. I think there's room for improvement here, but I'm happy this initial version includes some form of session limit.
+The tutor receives recent answered lessons plus evidence supporting current hypotheses. Baseline mode receives neither. CLI tools, workspace instructions, and plugins are disabled for these planning calls; this app supplies the complete context. OpenCode's global configuration is isolated, so choose a model explicitly if its default is unsuitable. Existing CLI authentication remains in use.
 
-There's also a more nebulous question: how do we know when a student has gained what they wanted from the system? I don't have a great way for Code Swipe to say, "You've learned what you came here to learn." Stickiness is a non-goal.
+**Export record** downloads plans and raw answers, including answers for any unfinished lesson. Keep it private if you want to preserve the exercise. Back up the entire data directory to restore it; export is for inspection, not an import format. Run only one server against a given data directory.
 
-Overall, the Code Swipe approach shows some promise, but its difficulty matching students with appropriate problems keeps it from being effective in its current form. It reproduces many of the findings discussed in [Applications of the Elo rating system in adaptive educational systems (Pelánek, 2016, Computers & Education)](https://doi.org/10.1016/j.compedu.2016.03.017).
+Optional settings are listed in [.env.example](.env.example). Copy it to `.env` to change the port, data directory, executable paths, or per-call planning timeout. Cancel/retry is available if a provider stalls. Starting the server again keeps completed work and allows a fresh attempt after an interrupted run.
 
-For future work, I'd recommend exploring how to categorize and organize concepts, determine student preferences, measure mastery, introduce appropriate problems over time, personalize learning sessions, and decide when learning is complete. Measuring mastery and deciding which concepts to introduce next would interest me most, but I think all these areas need another look to make Code Swipe a helpful educational tool.
+```sh
+npm run lint
+npm test
+npm run build
+npm start
+```
 
-## Run it yourself
+See [the architecture notes](docs/local-tutor.md) for the experiment's boundaries and [the original project notes](docs/original-project.md) for its earlier design. The original gameplay recording shows that earlier version:
 
-With Node 22+, run `npm ci` and `npm run dev`, then open `http://localhost:3000`.
+![Original Code Swipe gameplay](docs/assets/code-swipe-gameplay.gif)
 
-Sign-in and saved progress need a working Firebase configuration in `firebase-applet-config.json`. Copy `.env.example` to `.env` and add a Gemini key for AI features; built-in practice cards cover a few languages without one.
-
-Or use AI agents to fork it and create an offline-only version.
-
-Created with Gemini Canvas and later Google App Studio
+Created with Google App Studio

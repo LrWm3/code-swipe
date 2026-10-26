@@ -1,6 +1,5 @@
 {
-  "name": "Code Swipe - Adaptive",
-  "description": "An adaptive, gamified code reviewing and training console utilizing Tinder-like swipes, Firebase Auth + Firestore synchronization, and Gemini AI-backed secure code generation.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "name": "Code Swipe — Local Tutor",
+  "description": "A local code-review tutor that tests hypotheses about how you learn, using Codex or OpenCode.",
+  "requestFramePermissions": []
 }

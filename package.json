@@ -1,7 +1,7 @@
 {
-  "name": "code-swipe",
+  "name": "code-swipe-local",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -9,16 +9,14 @@
     "start": "NODE_ENV=production node dist/server.js",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "npm run build && node --import tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "@google/genai": "^1.29.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
-    "firebase": "^12.13.0",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
+    "quickjs-emscripten": "^0.32.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1"
   },
