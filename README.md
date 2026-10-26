@@ -2,7 +2,7 @@
 
 Train code review as a skill by reviewing code.
 
-Read a coding problem, a code snippet solving that problem, and swipe left or right to identify if the presented solution correctly implements the problem as specified or not. Review incorrect answers, see what was missed, examine adversarially prepared problems and improve over time.
+Read a coding problem, a code snippet solving that problem, and swipe left or right to identify if the presented solution correctly implements the problem as specified or not. Review incorrect answers, see what was missed, examine adversarially prepared problems and improve over time. 
 
 Over time problems become more difficult, are presented in unusual forms, and attempt to match to your level of demonstrated knowledge so you can continue to learn as you go without needing to intentionally select concepts to master.
 
@@ -29,11 +29,13 @@ Furthermore, `code-swipe` does not appropriately account for languages' surround
 
 A better version might allow students to provide areas of interest and gradually introduce related dependencies over time, like `pandas`, `numpy`, `trt`, `torch`, `onnx` etc, if they are introduced in machine learning, as an example. Or perhaps it would surface those subjects autonomously and allow students to indicate their interest at that time.
 
-There's also a more nebulous question about what it means for a student to have gained what they wanted from the platform. I don't have a great solution for having the platform say "you have learned what you need to learn."
+I like the session length as well. 10 a day seems arbitrary. More advanced platforms will try to design a session up front to balance engagement, desirable difficulty, and mental exhaustion. I think there is room for improvement here, but am happy session lengths were present in this initial version in some form.
+
+There's also a more nebulous question about what it means for a student to have gained what they wanted from the system. I don't have a great solution for having `code-swipe` say "you have learned what you came here to learn." Stickiness is a non-goal.
 
 Overall the `code-swipe` approach itself shows some promise, but the student problem matching problem prevents it from being effective as it exists today. It reproduces many of the discoveries made in [​Pelánek, R. (2016). Applications of the Elo rating system in adaptive educational systems. Computers & Education](https://doi.org/10.1016/j.compedu.2016.03.017).
 
-Recommendation for future work to further explore how to categories concepts, organize them logically, determine student preferences, measure mastery, and surface problems appropriately over time.
+Recommendation for future work to further explore how to categories concepts, organize them meaningfully, determine student preferences, measure mastery, surface problems appropriately over time and personalized learning sessions. 
 
 ## Run it yourself 
 
