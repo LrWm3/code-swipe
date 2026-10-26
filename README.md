@@ -4,6 +4,10 @@ Read a coding problem, a corresponding solution and swipe left or right to ident
 
 Over time problems become more difficult, are presented in unusual forms, and attempt to match to your level of demonstrated knowledge. 
 
+## Demo
+
+![Code Swipe gameplay: swiping code cards and reviewing bug explanations](docs/assets/code-swipe-gameplay.gif)
+
 ## Background
 
 This was a small project I made to explore this as an alternative idea for testing coding knowledge based on the ideas from [Using Erroneous Examples to Improve Mathematics Learning with a Web-Based Tutoring System (Adams et al., 2014).](https://www.cs.cmu.edu/~bmclaren/pubs/AdamsEtAl-UsingErrExToImproveMathLearningWithWebTutoringSys-CHB2014.pdf)
@@ -28,12 +32,12 @@ There's also a more nebulous question about what it means for a student to have 
 
 Overall the `code-swipe` approach itself shows some promise, but the student problem matching problem prevents it from being effective as it exists today.
 
-## Demo
-
-![Code Swipe gameplay: swiping code cards and reviewing bug explanations](docs/assets/code-swipe-gameplay.gif)
+## Run it yourself 
 
 With Node 22+, run `npm ci` and `npm run dev`, then open `http://localhost:3000`.
 
 Sign-in and saved progress need working Firebase configuration in `firebase-applet-config.json`. Copy `.env.example` to `.env` and add a Gemini key for AI features; built-in practice cards cover a few languages without one.
 
-Created with Google App Studio
+Or use AI agents to fork it and run it as an offline only version.
+
+Created with Gemini Canvas and later Google App Studio
