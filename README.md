@@ -14,12 +14,13 @@ Over time problems become more difficult, are presented in unusual forms, and at
 
 This was a small project I made to explore this as an alternative idea for testing coding knowledge based on the ideas from [Using Erroneous Examples to Improve Mathematics Learning with a Web-Based Tutoring System (Adams et al., 2014).](https://www.cs.cmu.edu/~bmclaren/pubs/AdamsEtAl-UsingErrExToImproveMathLearningWithWebTutoringSys-CHB2014.pdf)
 
-It extends it slightly by having initial representations of problems as relatively straightforward in how they are defined. Whereas later versions of the same problem are written in a more "adversarial" manner, to test if the learning holds.
+It extends it slightly by having initial representations of problems as relatively straightforward in how they are defined. Whereas later versions of the same problem are written in familiar manner, leveraging different programming styles such as imperative, functional, streams-based, object oriented, and more to test if the learning holds when the shape changes. Later problems mix concepts as well, so that a problem tests the readers ability to determine which part was done incorrectly, if there is an error.
 
-This core function appears to work quite well, although no actual controlled study was performed. In particular, different representations of essentially the same problem seemed like a strong methodology for avoiding learning only the shape of the problem but not the underlying rule, in my individual testing.
+Additionally, prblems are are eventually presented in an adversarial form, where comphrension requires carefully reading code that would typically not be seen in normal programming projects. This is intended to strengthen review capacity beyond what would be needed in a typical job setting.
 
+This core function appears to work quite well in my individual testing; no controlled studies were performed. In particular, different representations of essentially the same problem seemed like a strong methodology for avoiding learning only the shape of the problem but not the underlying rule, in my individual testing. And adversarially prepared problems seemed to help expand my conception of what problems I could potentially see in a way which felt beneficial.
 
-A weaker area is the elo system. Learning tends to be transitory; from not understanding to partial understanding to understanding, which elo does not capture well.
+A weaker area is the Elo system. Learning tends to be transitory; from not understanding to partial understanding to understanding, which elo does not capture well.
 
 Elo problem matching systems tend to suffer from difficulty spikes, long periods of problems being too easy or rapidly becoming too hard, and connecting concepts to difficulty. I would say this project reproduces those problems. 
 
@@ -35,7 +36,7 @@ There's also a more nebulous question about what it means for a student to have 
 
 Overall the `code-swipe` approach itself shows some promise, but the student problem matching problem prevents it from being effective as it exists today. It reproduces many of the discoveries made in [​Pelánek, R. (2016). Applications of the Elo rating system in adaptive educational systems. Computers & Education](https://doi.org/10.1016/j.compedu.2016.03.017).
 
-Recommendation for future work to further explore how to categories concepts, organize them meaningfully, determine student preferences, measure mastery, surface problems appropriately over time and personalizing learning sessions. 
+Recommendation for future work to further explore how to categories concepts, organize them meaningfully, determine student preferences, measure mastery, surface problems appropriately over time, personalizing learning sessions and when to consider learning complete. I personally would find measuring mastery and concept surfacing the most interesting to do next, but above are the areas I think would need to be revisited to make `code-swipe` a helpful educational tool.
 
 ## Run it yourself 
 
