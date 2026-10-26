@@ -220,7 +220,7 @@ async function runStructuredTutor(
   if (provider !== 'codex' && provider !== 'opencode') throw new Error('Choose Codex or OpenCode for CLI generation.');
   if (options.signal.aborted) throw abortError();
   const configuredTimeout = Number(process.env.CODE_SWIPE_TUTOR_TIMEOUT_MS);
-  const timeout = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? Math.min(configuredTimeout, 600_000) : 180_000;
+  const timeout = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? Math.min(configuredTimeout, 600_000) : request.subject === 'lesson' ? 360_000 : 180_000;
   const directory = await mkdtemp(join(tmpdir(), 'code-swipe-tutor-'));
   try {
     const env = isolatedEnvironment(directory);

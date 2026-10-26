@@ -44,6 +44,7 @@ export function buildDiscussionPrompt(context: DiscussionContext): string {
   });
   const evidence = {
     interests: context.tutor.settings.interests,
+    curriculumMemory: context.tutor.curriculum ?? { concepts: [], variants: [], legacyLessons: [] },
     lesson: context.lesson,
     attempts: context.attempts.filter(attempt => !attempt.flagged),
     feedback: context.feedback,

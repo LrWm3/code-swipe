@@ -183,7 +183,7 @@ test('given a real historical attempt, when citing it consistently, then evidenc
     questions: lesson().questions.map((question, index) => ({ ...question, id: `question-${index}`, validation: { checkedAt: '', testCount: 4, passedCount: 4, failures: [] } })),
   };
   tutor.history = [{ lesson: previous, attempts: [{ id: 'actual-attempt', lessonId: previous.id, exerciseId: 'question-0', answer: 'buggy', correct: true, answeredAt: new Date().toISOString(), elapsedMs: 2000, flagged: false }] }];
-  const proposal = lesson();
+  const proposal = createDemoLesson(tutor);
   proposal.hypotheses[0].status = 'supported';
   proposal.hypotheses[0].supportingAttemptIds = ['actual-attempt'];
   assert.equal((await validateLesson(proposal, tutor)).hypotheses[0].status, 'supported');

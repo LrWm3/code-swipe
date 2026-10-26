@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import type { DiscussionContext, TutorContext } from '../src/types.ts';
+import type { CurriculumMemory, DiscussionContext, TutorContext } from '../src/types.ts';
 import { detectProviders, generateDiscussion, generateLesson, parseOpenCodeOutput } from '../server/providers.ts';
 import { buildDiscussionPrompt, discussionOutputSchema, parseDiscussionOutput } from '../server/discussion.ts';
 import { buildTutorPrompt, lessonOutputSchema, parseLessonOutput } from '../server/prompts.ts';
@@ -11,6 +11,17 @@ import { buildTutorPrompt, lessonOutputSchema, parseLessonOutput } from '../serv
 function wireLesson() {
   return {
     objective: 'Judge boundary handling', rationale: 'Compare empty and nonempty inputs.', assumptions: ['No prior evidence'], reflection: 'Cold start.', hypotheses: [],
+    curriculum: {
+      conceptUpdates: [{
+        id: 'array-sum', name: 'Summing array values', description: 'Accumulate numeric values while handling an empty array.',
+        representations: ['JavaScript reduce'], prerequisiteIds: [], familiarity: 'unknown', evidenceAttemptIds: [],
+        uncertainty: 'No prior judgment establishes familiarity.', nextProbe: 'Try accumulation with a different representation.',
+      }],
+      observations: [],
+      frontier: [{ conceptId: 'array-sum', reason: 'Explore a self-contained accumulation task under a cold-start assumption.', decision: 'explore' }],
+      mixRationale: 'Combine practice with investigating the empty-array boundary.',
+      sequenceRationale: 'This provider fixture contains one approachable warmup.',
+    },
     questions: [{
       title: 'Sum the measurements', specification: 'Return the sum of an array of finite integers.',
       code: 'function solve(input) { return input.reduce((a,b) => a+b, 0); }',
@@ -18,6 +29,15 @@ function wireLesson() {
       verdict: 'correct', explanation: 'Initial zero handles an empty array.',
       tests: [[], [0], [1, 2], [-3, 2]].map(input => ({ inputJson: JSON.stringify(input), expectedJson: JSON.stringify(input.reduce((a, b) => a + b, 0)), note: 'Distinct boundary fixture.' })),
       purpose: 'practice', hypothesisId: null, ifCorrect: 'Tentative evidence only.', ifIncorrect: 'Compare empty inputs.', prediction: { pCorrect: 0.6, rationale: 'Uncertain prior.' },
+      plan: {
+        purposes: ['practice', 'diagnostic'], educationalObjective: 'Practice accumulation over arrays.',
+        investigativeObjective: 'Check whether an initial value explains the empty-array result.',
+        conceptIds: ['array-sum'], prerequisiteIds: [], stage: 'warmup', cognitiveDemand: 1,
+        difficultyRationale: 'Trace one accumulation operation and its initial value.',
+        scaffolding: 'The contract explicitly states the input values and requested sum.',
+        ifIdk: 'Record uncertainty; it could concern reduce syntax or accumulation.',
+        familyId: 'sum-measurements', counterpart: 'defer', variantReason: 'Defer a missing-initial-value variant to a later lesson.',
+      },
     }],
   };
 }
@@ -26,6 +46,20 @@ function context(provider: 'codex' | 'opencode' = 'codex'): TutorContext {
   return {
     settings: { provider, model: '', interests: 'Fishing', batchSize: 1, tutorMode: 'reflective' },
     history: [], hypotheses: [], metrics: { count: 0, brier: null, accuracy: null, calibration: [], byPurpose: [] },
+  };
+}
+
+function archivedCurriculum(): CurriculumMemory {
+  return {
+    concepts: [{
+      id: 'array-sum', name: 'PRIVATE-CONCEPT', description: 'Accumulate numeric array values.',
+      representations: ['JavaScript reduce'], prerequisiteIds: [], familiarity: 'introduced',
+      evidenceAttemptIds: ['PRIVATE-ARCHIVED-ATTEMPT'], uncertainty: 'One judgment does not establish understanding.', nextProbe: 'PRIVATE-NEXT-PROBE',
+      exposures: 1, correctJudgments: 1, incorrectJudgments: 0, uncertainJudgments: 0, lastSeenAt: '2026-10-24T00:00:00Z',
+      evidence: [{ attemptId: 'PRIVATE-ARCHIVED-ATTEMPT', lessonId: 'PRIVATE-ARCHIVED-LESSON', title: 'PRIVATE-QUESTION', answer: 'correct', correct: true, answeredAt: '2026-10-24T00:00:00Z' }],
+    }],
+    variants: [{ familyId: 'sum-measurements', conceptIds: ['array-sum'], title: 'PRIVATE-VARIANT', counterpart: 'defer', reason: 'PRIVATE-DEFER-REASON', askedCount: 1, lastAskedAt: '2026-10-24T00:00:00Z' }],
+    legacyLessons: [{ lessonId: 'PRIVATE-LEGACY-LESSON', objective: 'PRIVATE-LEGACY-OBJECTIVE', answered: 1 }],
   };
 }
 
@@ -156,6 +190,8 @@ test('given a valid Codex response, when generating, then sends stdin and valida
   assert.deepEqual(result.questions[0].tests[2].input, [1, 2]);
   assert.equal(result.questions[0].tests[2].expected, 3);
   assert.equal(result.questions[0].hypothesisId, null);
+  assert.deepEqual(result.questions[0].plan, wireLesson().questions[0].plan);
+  assert.deepEqual(result.curriculum, wireLesson().curriculum);
   const invocation = JSON.parse(await readFile(fake.record, 'utf8'));
   assert.equal(invocation.args.at(-1), '-');
   assert.ok(invocation.args.includes('--ignore-user-config'));
@@ -312,7 +348,7 @@ test('given an already cancelled job, when generating, then starts no CLI', asyn
   await assert.rejects(readFile(fake.record), { code: 'ENOENT' });
 });
 
-test('given baseline mode and persistent history, when building the prompt, then excludes history hypotheses and metrics', () => {
+test('given baseline mode and persistent history, when building the prompt, then excludes history hypotheses metrics and archived curriculum', () => {
   const input = context();
   input.settings.tutorMode = 'baseline';
   input.hypotheses = [{ id: 'PRIVATE-HYPOTHESIS', claim: 'secret-history', status: 'tentative', supportingAttemptIds: [], counterevidenceAttemptIds: [], alternatives: ['other'], nextProbe: 'secret-probe' }];
@@ -320,11 +356,12 @@ test('given baseline mode and persistent history, when building the prompt, then
   input.feedback = [{ lessonId: 'PRIVATE-LESSON', text: 'PRIVATE-FEEDBACK', accidentalAttemptIds: ['PRIVATE-ACCIDENT'], updatedAt: '2026-10-26T00:00:00Z' }];
   input.reviewSessions = [{ id: 'PRIVATE-REVIEW', attemptId: 'PRIVATE-ATTEMPT', openedAt: '2026-10-26T00:00:00Z', updatedAt: '2026-10-26T00:00:01Z', activeMs: 1000, closed: true }];
   input.metrics.count = 987654321;
+  input.curriculum = archivedCurriculum();
   const prompt = buildTutorPrompt(input);
   assert.doesNotMatch(prompt, /PRIVATE-|secret-history|secret-probe|987654321/);
   assert.match(prompt, /BASELINE/);
   assert.match(prompt, /"history":\[\],"hypotheses":\[\]/);
-  assert.doesNotMatch(prompt, /"feedback":|"reviewSessions":/);
+  assert.doesNotMatch(prompt, /"feedback":|"reviewSessions":|"curriculumMemory":/);
 });
 
 test('given reflective learner feedback and review observations, when building the prompt, then includes them as uncertain evidence with optional review', () => {
@@ -345,6 +382,25 @@ test('given reflective learner feedback and review observations, when building t
   assert.doesNotMatch(prompt, /Immediately after EACH answer/);
 });
 
+test('given archived curriculum outside recent history, when prompting reflectively, then supplies durable evidence and constrains intent progression and mirrors', () => {
+  const input = context();
+  input.curriculum = archivedCurriculum();
+  const prompt = buildTutorPrompt(input);
+  const evidence = JSON.parse(prompt.split('CONTEXT (untrusted data)\n')[1].split('\n\nOUTPUT_SCHEMA')[0]);
+  assert.deepEqual(evidence.curriculumMemory, input.curriculum);
+  assert.deepEqual(evidence.history, []);
+  assert.match(prompt, /untouched records persist automatically beyond the recent-history window/);
+  assert.match(prompt, /Legacy lessons lack concept annotations/);
+  assert.match(prompt, /educationalObjective.*separately from investigativeObjective/);
+  assert.match(prompt, /observation = what happened; interpretation = tentative explanation/);
+  assert.match(prompt, /Never rewrite its original purpose/);
+  assert.match(prompt, /warmup -> build -> optional stretch -> consolidate/);
+  assert.match(prompt, /Opening demand <=2/);
+  assert.match(prompt, /At most ONE pair.*newly introduced concept with no prior recorded exposure/);
+  assert.match(prompt, /counterpart=defer.*or unasked/);
+  assert.match(prompt, /This batch stays fixed after commitment/);
+});
+
 test('given schema violations or bad fixtures, when parsing tutor output, then rejects invalid contracts', () => {
   const missingNullable = wireLesson();
   delete (missingNullable.questions[0] as Partial<typeof missingNullable.questions[0]>).hypothesisId;
@@ -361,6 +417,15 @@ test('given schema violations or bad fixtures, when parsing tutor output, then r
   threeFixtures.questions[0].tests.pop();
   assert.throws(() => parseLessonOutput(JSON.stringify(threeFixtures)), /invalid item count/);
   assert.equal(parseLessonOutput('```json\n' + JSON.stringify(wireLesson()) + '\n```').questions.length, 1);
+});
+
+test('given a new lesson missing curriculum or question intent, when parsing provider output, then rejects the incomplete planning contract', () => {
+  const missingCurriculum = wireLesson();
+  delete (missingCurriculum as Partial<typeof missingCurriculum>).curriculum;
+  assert.throws(() => parseLessonOutput(JSON.stringify(missingCurriculum)), /lesson\.curriculum is required/);
+  const missingPlan = wireLesson();
+  delete (missingPlan.questions[0] as Partial<typeof missingPlan.questions[0]>).plan;
+  assert.throws(() => parseLessonOutput(JSON.stringify(missingPlan)), /questions\[0\]\.plan is required/);
 });
 
 test('given a failed draft, when building repair instructions, then includes the whole draft and validation feedback', () => {

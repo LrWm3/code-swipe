@@ -4,6 +4,8 @@ import { resolve, join } from 'node:path';
 import type { AppState, Attempt, Lesson, LessonSummary, Metrics, ProposedLesson, ProviderStatus, Review, ReviewSession, LessonFeedback, Settings, StoreData, TutorContext, ValidationReport, Answer, Job, Discussion, DiscussionContext, ProposedDiscussion } from '../src/types.ts';
 import { parseDiscussionOutput } from './discussion.ts';
 import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from '../src/lesson-sizes.ts';
+import { PURPOSES } from '../src/types.ts';
+import { buildCurriculumMemory } from './curriculum-memory.ts';
 
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -31,7 +33,7 @@ export function calculateMetrics(data: StoreData, filter?: Pick<Settings, 'provi
     const lesson = data.lessons.find(item => item.id === attempt.lessonId);
     if (!lesson || (filter && (lesson.provider !== filter.provider || lesson.tutorMode !== filter.tutorMode))) return [];
     const question = lesson.questions.find(item => item.id === attempt.exerciseId);
-    return question ? [{ p: question.prediction.pCorrect, y: Number(attempt.correct), purpose: question.purpose }] : [];
+    return question ? [{ p: question.prediction.pCorrect, y: Number(attempt.correct), purposes: question.plan?.purposes ?? [question.purpose] }] : [];
   });
   return {
     count: observations.length,
@@ -43,8 +45,8 @@ export function calculateMetrics(data: StoreData, filter?: Pick<Settings, 'provi
         predicted: items.length ? items.reduce((sum, item) => sum + item.p, 0) / items.length : null,
         actual: items.length ? items.reduce((sum, item) => sum + item.y, 0) / items.length : null };
     }),
-    byPurpose: (['diagnostic', 'practice', 'transfer', 'retention'] as const).map(purpose => {
-      const items = observations.filter(item => item.purpose === purpose);
+    byPurpose: PURPOSES.map(purpose => {
+      const items = observations.filter(item => item.purposes.includes(purpose));
       return { purpose, count: items.length, accuracy: items.length ? items.reduce((sum, item) => sum + item.y, 0) / items.length : null };
     }),
   };
@@ -119,6 +121,7 @@ export class LocalStore {
       tutorMode: settings.tutorMode, interests: settings.interests,
       objective: proposal.objective, rationale: proposal.rationale, assumptions: proposal.assumptions,
       reflection: proposal.reflection, hypotheses: proposal.hypotheses,
+      ...(proposal.curriculum ? { curriculum: proposal.curriculum } : {}),
       questions: proposal.questions.map((question, index) => ({ ...question, id: randomUUID(), validation: proposal.reports[index] })),
       predictionHash: '',
     };
@@ -258,13 +261,16 @@ export class LocalStore {
   private review(attempt: Attempt): Review {
     const lesson = this.data.lessons.find(item => item.id === attempt.lessonId)!;
     const question = lesson.questions.find(item => item.id === attempt.exerciseId)!;
-    return structuredClone({ attempt, question, lessonObjective: lesson.objective, provider: lesson.provider });
+    const complete = this.data.attempts.filter(item => item.lessonId === lesson.id).length === lesson.questions.length;
+    // Planning metadata may identify a future mirror and reveal its verdict.
+    const { plan: _plan, ...answeredQuestion } = question;
+    return structuredClone({ attempt, question: complete ? question : answeredQuestion, lessonObjective: lesson.objective, provider: lesson.provider });
   }
 
   context(): TutorContext {
     const history = this.data.lessons.map(lesson => ({ lesson, attempts: this.data.attempts.filter(item => item.lessonId === lesson.id && !item.flagged) }));
     if (this.data.settings.tutorMode === 'baseline') {
-      return { settings: { ...this.data.settings }, history: [], hypotheses: [], reviewSessions: [], feedback: [], discussions: [], metrics: calculateMetrics({ ...this.data, lessons: [], attempts: [] }) };
+      return { settings: { ...this.data.settings }, history: [], hypotheses: [], reviewSessions: [], feedback: [], discussions: [], curriculum: { concepts: [], variants: [], legacyLessons: [] }, metrics: calculateMetrics({ ...this.data, lessons: [], attempts: [] }) };
     }
     const hypotheses = this.data.lessons.at(-1)?.hypotheses ?? [];
     const evidence = new Set(hypotheses.flatMap(item => [...item.supportingAttemptIds, ...item.counterevidenceAttemptIds]));
@@ -277,6 +283,7 @@ export class LocalStore {
     const discussions = (this.data.discussions ?? []).filter(item => knownLessons.has(item.lessonId)).slice(-12);
     while (discussions.length > 1 && Buffer.byteLength(JSON.stringify(discussions)) > 48_000) discussions.shift();
     return { settings: { ...this.data.settings }, history: structuredClone(selected),
+      curriculum: buildCurriculumMemory(this.data),
       discussions: structuredClone(discussions),
       feedback: structuredClone((this.data.feedback ?? []).filter(item => knownLessons.has(item.lessonId))),
       reviewSessions: structuredClone((this.data.reviewSessions ?? []).filter(item => knownIds.has(item.attemptId))),
@@ -301,6 +308,7 @@ export class LocalStore {
         provider: lesson.provider, tutorMode: lesson.tutorMode, answered, total: lesson.questions.length, complete,
         reflection: complete ? lesson.reflection : null, assumptions: complete ? lesson.assumptions : [],
         hypotheses: complete ? lesson.hypotheses : [], predictionHash: lesson.predictionHash,
+        ...(complete && lesson.curriculum ? { curriculum: lesson.curriculum } : {}),
         feedback: this.data.feedback?.find(item => item.lessonId === lesson.id) };
     });
     const current = this.pendingQuestion();

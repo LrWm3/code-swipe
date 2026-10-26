@@ -1,6 +1,9 @@
 import { getQuickJS } from 'quickjs-emscripten';
 import type { JsonValue, ProposedLesson, TutorContext, ValidationReport } from '../src/types.ts';
 import { LESSON_SIZES } from '../src/lesson-sizes.ts';
+import { PURPOSES } from '../src/types.ts';
+import { curriculumSchema, questionPlanSchema, validateSchema } from './prompts.ts';
+import { validateCurriculum } from './curriculum-validation.ts';
 
 const MAX_PAYLOAD = 180_000;
 const MAX_VALUE = 16_000;
@@ -97,7 +100,7 @@ function canonical(value: JsonValue): string {
 
 function structure(proposal: unknown, context: TutorContext): ProposedLesson {
   checkJSON(proposal);
-  const lesson = object(proposal, 'lesson', ['objective', 'rationale', 'assumptions', 'reflection', 'hypotheses', 'questions']);
+  const lesson = object(proposal, 'lesson', ['objective', 'rationale', 'assumptions', 'reflection', 'hypotheses', 'questions', 'curriculum']);
   string(lesson.objective, 'objective', 600);
   string(lesson.rationale, 'rationale', 2_000);
   string(lesson.reflection, 'reflection', 2_000);
@@ -134,7 +137,7 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
   const unique = { title: new Set<string>(), code: new Set<string>() };
   for (let i = 0; i < questions.length; i++) {
     const path = `questions[${i}]`;
-    const question = object(questions[i], path, ['title', 'specification', 'code', 'referenceCode', 'verdict', 'explanation', 'tests', 'purpose', 'hypothesisId', 'ifCorrect', 'ifIncorrect', 'prediction']);
+    const question = object(questions[i], path, ['title', 'specification', 'code', 'referenceCode', 'verdict', 'explanation', 'tests', 'purpose', 'hypothesisId', 'ifCorrect', 'ifIncorrect', 'prediction', 'plan']);
     string(question.title, `${path}.title`, 140);
     string(question.specification, `${path}.specification`, 2_000);
     string(question.code, `${path}.code`, 6_000);
@@ -149,10 +152,27 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
       unique[key].add(normalized);
     }
     oneOf(question.verdict, `${path}.verdict`, ['correct', 'buggy']);
-    oneOf(question.purpose, `${path}.purpose`, ['diagnostic', 'practice', 'transfer', 'retention']);
-    if (question.purpose === 'retention') {
-      const delayed = context.history.flatMap(item => item.attempts).filter(attempt => attemptIds.has(attempt.id) && Date.now() - Date.parse(attempt.answeredAt) >= 86_400_000);
-      if (!delayed.some(attempt => (lesson.rationale as string).includes(attempt.id))) reject(`${path}.purpose`, 'retention requires an unflagged attempt at least 24 hours old cited in the lesson rationale.');
+    oneOf(question.purpose, `${path}.purpose`, [...PURPOSES]);
+    try { validateSchema(question.plan, questionPlanSchema, `${path}.plan`); }
+    catch (error) { reject(path, (error as Error).message); }
+    if ((question.plan as ProposedLesson['questions'][number]['plan'])!.purposes.includes('retention')) {
+      const targetConcepts = (question.plan as NonNullable<ProposedLesson['questions'][number]['plan']>).conceptIds;
+      const candidates = new Map<string, string>();
+      for (const concept of context.curriculum?.concepts ?? []) {
+        if (targetConcepts.includes(concept.id)) for (const evidence of concept.evidence) candidates.set(evidence.attemptId, evidence.answeredAt);
+      }
+      for (const { lesson: previous, attempts } of context.history) for (const attempt of attempts) {
+        candidates.delete(attempt.id); // Raw evidence overrides summaries, including exclusions.
+        const previousQuestion = previous.questions.find(item => item.id === attempt.exerciseId);
+        if (!attemptIds.has(attempt.id) || !previousQuestion) continue;
+        const linked = previousQuestion.plan?.conceptIds.some(id => targetConcepts.includes(id))
+          || (!previousQuestion.plan && Array.isArray((lesson.curriculum as ProposedLesson['curriculum'])?.conceptUpdates)
+            && (lesson.curriculum as NonNullable<ProposedLesson['curriculum']>).conceptUpdates.some(concept => targetConcepts.includes(concept.id) && concept.evidenceAttemptIds.includes(attempt.id)));
+        if (linked) candidates.set(attempt.id, attempt.answeredAt);
+      }
+      if (context.settings.tutorMode === 'baseline' || ![...candidates].some(([id, at]) => Date.now() - Date.parse(at) >= 86_400_000 && (lesson.rationale as string).includes(id))) {
+        reject(`${path}.purpose`, 'retention requires a related unflagged attempt at least 24 hours old cited in the lesson rationale.');
+      }
     }
     if (question.hypothesisId !== null && (typeof question.hypothesisId !== 'string' || !hypothesisIds.has(question.hypothesisId))) {
       reject(`${path}.hypothesisId`, 'must be null or reference a hypothesis in this lesson.');
@@ -173,6 +193,10 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
       inputs.add(signature);
     }
   }
+  try {
+    validateSchema(lesson.curriculum, curriculumSchema, 'curriculum');
+    validateCurriculum(proposal as unknown as ProposedLesson, context);
+  } catch (error) { reject('curriculum', (error as Error).message); }
   // The checks above validate every field without coercing the provider response.
   return proposal as unknown as ProposedLesson;
 }

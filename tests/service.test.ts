@@ -187,26 +187,31 @@ test('given baseline demo settings, when publishing a local lesson, then it cont
   assert.ok(committed.questions.every(question => question.hypothesisId === null));
 });
 
-test('given paired probes sharing a specification, when their implementations differ, then the tutor can publish both verified judgments', async t => {
+test('given one declared mirror pair teaching a new concept, when its implementations differ, then both verified judgments can publish after the warmup', async t => {
   const store = temporaryStore(t);
   const service = new TutorService(store, AVAILABLE, async context => {
     const proposal = createDemoLesson(context);
-    proposal.questions[1] = {
-      ...structuredClone(proposal.questions[0]),
-      title: 'Nonnegative readings with the inclusive boundary',
-      code: proposal.questions[0].referenceCode,
-      verdict: 'correct',
-      explanation: 'The inclusive comparison keeps zero while removing negative values.',
+    // Give the pair its own unexposed concept, rather than the warmup's concept.
+    proposal.curriculum!.conceptUpdates.push({ ...structuredClone(proposal.curriculum!.conceptUpdates[0]), id: 'reduce-seed', name: 'Reduction initial values' });
+    const first = proposal.questions[1];
+    first.plan = { ...first.plan!, familyId: 'quantity-total', conceptIds: ['reduce-seed'], purposes: ['introduction', 'practice'], counterpart: 'in-lesson', variantReason: 'Teach the role of an explicit reduce initial value through one controlled contrast.' };
+    first.purpose = 'introduction';
+    proposal.questions[2] = {
+      ...structuredClone(first),
+      title: 'Quantities with an extra initial item',
+      code: 'function solve(input) { return input.reduce((total, order) => total + order.quantity, 1); }',
+      verdict: 'buggy',
+      explanation: 'Starting at one adds an item not present in the input.',
     };
     return proposal;
   });
   service.plan();
   await service.settled();
   assert.equal(service.job?.status, 'ready');
-  const [first, paired] = store.snapshot().lessons[0].questions;
+  const [, first, paired] = store.snapshot().lessons[0].questions;
   assert.equal(first.specification, paired.specification);
   assert.notEqual(first.code, paired.code);
-  assert.equal(first.verdict, 'buggy');
-  assert.equal(paired.verdict, 'correct');
-  assert.equal(paired.validation.passedCount, paired.validation.testCount);
+  assert.equal(first.verdict, 'correct');
+  assert.equal(paired.verdict, 'buggy');
+  assert.ok(paired.validation.failures.length > 0);
 });

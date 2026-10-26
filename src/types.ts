@@ -1,7 +1,72 @@
 export type ProviderId = 'codex' | 'opencode' | 'demo';
 export type Verdict = 'buggy' | 'correct';
 export type Answer = Verdict | 'idk';
-export type Purpose = 'diagnostic' | 'practice' | 'transfer' | 'retention';
+export const PURPOSES = ['diagnostic', 'practice', 'transfer', 'retention', 'introduction', 'frontier', 'robustness', 'calibration', 'strategy-evaluation'] as const;
+export type Purpose = typeof PURPOSES[number];
+export interface ConceptUpdate {
+  id: string;
+  name: string;
+  description: string;
+  representations: string[];
+  prerequisiteIds: string[];
+  familiarity: 'unknown' | 'introduced' | 'developing' | 'familiar';
+  evidenceAttemptIds: string[];
+  uncertainty: string;
+  nextProbe: string;
+}
+export interface QuestionPlan {
+  purposes: Purpose[];
+  educationalObjective: string;
+  investigativeObjective: string;
+  conceptIds: string[];
+  prerequisiteIds: string[];
+  stage: 'warmup' | 'build' | 'stretch' | 'consolidate';
+  cognitiveDemand: number;
+  difficultyRationale: string;
+  scaffolding: string;
+  ifIdk: string;
+  familyId: string;
+  counterpart: 'in-lesson' | 'defer' | 'unasked';
+  variantReason: string;
+}
+export interface LearningObservation {
+  attemptIds: string[];
+  conceptIds: string[];
+  observation: string;
+  interpretation: string;
+  nextAction: string;
+}
+export interface CurriculumPlan {
+  conceptUpdates: ConceptUpdate[];
+  observations: LearningObservation[];
+  frontier: { conceptId: string; reason: string; decision: 'introduce' | 'defer' | 'explore' }[];
+  mixRationale: string;
+  sequenceRationale: string;
+}
+export interface ConceptRecord extends ConceptUpdate {
+  exposures: number;
+  correctJudgments: number;
+  incorrectJudgments: number;
+  uncertainJudgments: number;
+  lastSeenAt: string | null;
+  evidence: { attemptId: string; lessonId: string; title: string; answer: Answer; correct: boolean | null; answeredAt: string }[];
+}
+export interface VariantRecord {
+  familyId: string;
+  conceptIds: string[];
+  title: string;
+  counterpart: QuestionPlan['counterpart'];
+  reason: string;
+  askedCount: number;
+  lastAskedAt: string | null;
+  askedVerdicts?: Verdict[];
+  counterpartStatus?: 'deferred' | 'unasked' | 'shown';
+}
+export interface CurriculumMemory {
+  concepts: ConceptRecord[];
+  variants: VariantRecord[];
+  legacyLessons: { lessonId: string; objective: string; answered: number }[];
+}
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 export interface Settings {
@@ -34,6 +99,8 @@ export interface ProposedQuestion {
   ifCorrect: string;
   ifIncorrect: string;
   prediction: { pCorrect: number; rationale: string };
+  // Optional only for reading sealed lessons created before curriculum planning.
+  plan?: QuestionPlan;
 }
 export interface ProposedLesson {
   objective: string;
@@ -42,6 +109,7 @@ export interface ProposedLesson {
   reflection: string;
   hypotheses: Hypothesis[];
   questions: ProposedQuestion[];
+  curriculum?: CurriculumPlan;
 }
 export interface ValidationReport {
   checkedAt: string;
@@ -131,6 +199,7 @@ export interface TutorContext {
   reviewSessions?: ReviewSession[];
   feedback?: LessonFeedback[];
   discussions?: Discussion[];
+  curriculum?: CurriculumMemory;
   repair?: string[];
   draft?: ProposedLesson;
 }
@@ -181,6 +250,7 @@ export interface LessonSummary {
   hypotheses: Hypothesis[];
   predictionHash: string;
   feedback?: LessonFeedback;
+  curriculum?: CurriculumPlan;
 }
 export interface AppState {
   settings: Settings;

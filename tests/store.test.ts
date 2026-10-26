@@ -74,6 +74,28 @@ test('given an unattempted question, when a store consumer changes its returned 
   assert.equal(store.pendingQuestion()?.code, committed.questions[0].code);
 });
 
+test('given sealed legacy questions without curriculum metadata, when a later plan annotates their evidence, then old artifacts remain unchanged and exposure survives restart', async t => {
+  const store = temporaryStore(t);
+  const context = store.context();
+  const legacy = await validateLesson(createDemoLesson(context), context);
+  delete legacy.curriculum;
+  for (const question of legacy.questions) delete question.plan;
+  const lesson = store.commitLesson(legacy, context.settings);
+  finish(store, lesson);
+  const artifactPath = join(store.directory, 'plans', `${lesson.id}.json`);
+  const sealed = readFileSync(artifactPath, 'utf8');
+  const restarted = new LocalStore(store.directory);
+  const nextContext = restarted.context();
+  assert.equal(nextContext.curriculum?.legacyLessons[0].answered, lesson.questions.length);
+  const proposal = createDemoLesson(nextContext);
+  proposal.curriculum!.conceptUpdates[0].evidenceAttemptIds = [nextContext.history[0].attempts[0].id];
+  restarted.commitLesson(await validateLesson(proposal, nextContext), nextContext.settings);
+  const reopened = new LocalStore(store.directory);
+  assert.equal(reopened.context().curriculum?.concepts.find(item => item.id === 'demo-code-review')?.exposures, 1);
+  assert.equal(readFileSync(artifactPath, 'utf8'), sealed);
+  assert.equal(reopened.snapshot().lessons[0].predictionHash, lesson.predictionHash);
+});
+
 test('given a modified state or artifact, when reopening history, then corruption is reported without resetting user data', async t => {
   for (const target of ['state', 'artifact'] as const) {
     const store = temporaryStore(t);
@@ -97,12 +119,14 @@ test('given an unanswered lesson, when requesting public state, then future verd
   proposal.reflection = 'PRIVATE_REFLECTION_UNTIL_COMPLETE';
   proposal.assumptions = ['PRIVATE_ASSUMPTION_UNTIL_COMPLETE'];
   proposal.hypotheses[0].claim = 'PRIVATE_HYPOTHESIS_UNTIL_COMPLETE';
+  proposal.curriculum!.mixRationale = 'PRIVATE_CURRICULUM_UNTIL_COMPLETE';
   proposal.questions.forEach((question, index) => {
     question.explanation = `PRIVATE_EXPLANATION_${index}`;
     question.prediction.rationale = `PRIVATE_PREDICTION_${index}`;
     question.ifCorrect = `PRIVATE_IF_CORRECT_${index}`;
     question.ifIncorrect = `PRIVATE_IF_INCORRECT_${index}`;
     question.referenceCode += `\n// PRIVATE_REFERENCE_${index}`;
+    question.plan!.variantReason = 'PRIVATE_VARIANT_UNTIL_COMPLETE';
   });
   const committed = store.commitLesson(proposal, context.settings);
   const before = store.publicState([], null);
@@ -120,12 +144,16 @@ test('given an unanswered lesson, when requesting public state, then future verd
   assert.equal(during.reviews[0].question.prediction.rationale, 'PRIVATE_PREDICTION_0');
   assert.doesNotMatch(JSON.stringify(during), /PRIVATE_(?:EXPLANATION|PREDICTION|REFERENCE|IF_CORRECT|IF_INCORRECT)_[1-9]\d*|PRIVATE_.*_UNTIL_COMPLETE/);
   assert.equal(during.currentLesson?.complete, false);
+  assert.equal(during.currentLesson?.curriculum, undefined);
+  assert.equal(during.reviews[0].question.plan, undefined);
   for (const question of committed.questions.slice(1)) store.answer(question.id, question.verdict, 1_000);
   const after = store.publicState([], null);
   assert.equal(after.question, null);
   assert.equal(after.currentLesson?.complete, true);
   assert.equal(after.currentLesson?.reflection, 'PRIVATE_REFLECTION_UNTIL_COMPLETE');
   assert.equal(after.hypotheses[0].claim, 'PRIVATE_HYPOTHESIS_UNTIL_COMPLETE');
+  assert.equal(after.currentLesson?.curriculum?.mixRationale, 'PRIVATE_CURRICULUM_UNTIL_COMPLETE');
+  assert.equal(after.reviews[0].question.plan?.variantReason, 'PRIVATE_VARIANT_UNTIL_COMPLETE');
 });
 
 test('given a recorded answer, when the same request is retried across restart, then it is idempotent and conflicting changes are rejected', async t => {
@@ -201,6 +229,7 @@ test('given forecasts from several provider and tutor-mode groups, when scoring 
     lesson.questions[0].id = `question-${index}`;
     lesson.questions[0].prediction.pCorrect = item.p;
     lesson.questions[0].purpose = item.purpose;
+    lesson.questions[0].plan!.purposes = [item.purpose];
     data.lessons.push(lesson);
     data.attempts.push({ id: `attempt-${index}`, lessonId: lesson.id, exerciseId: lesson.questions[0].id, answer: item.correct ? 'buggy' : 'correct', correct: item.correct, answeredAt: new Date().toISOString(), elapsedMs: 1_000, flagged: item.flagged ?? false });
   });
@@ -218,6 +247,9 @@ test('given forecasts from several provider and tutor-mode groups, when scoring 
   assert.equal(all.calibration[0].count, 1);
   assert.equal(all.calibration[4].count, 2);
   assert.equal(calculateMetrics(data, { provider: 'codex', tutorMode: 'baseline' }).brier, 1);
+  data.lessons[0].questions[0].plan!.purposes.push('transfer');
+  assert.deepEqual(calculateMetrics(data).byPurpose.find(item => item.purpose === 'transfer'), { purpose: 'transfer', count: 1, accuracy: 1 });
+  assert.equal(calculateMetrics(data).count, 4, 'multiple purposes do not double-count overall prediction metrics');
   const empty = calculateMetrics(data, { provider: 'demo', tutorMode: 'baseline' });
   assert.equal(empty.count, 0);
   assert.equal(empty.brier, null);
@@ -457,6 +489,7 @@ test('given a retention proposal, when its cited observation is recent missing o
   const observation = context.history[0].attempts[0];
   const proposal = createDemoLesson(context);
   proposal.questions[0].purpose = 'retention';
+  proposal.questions[0].plan!.purposes = ['retention', 'diagnostic'];
   proposal.rationale = `Revisit the skill assessed by attempt ${observation.id} after a delay.`;
   await assert.rejects(validateLesson(proposal, context), /retention requires.*24 hours/);
   observation.answeredAt = new Date(Date.now() - 25 * 60 * 60 * 1_000).toISOString();
@@ -477,6 +510,25 @@ test('given malformed settings, when parsing or saving them, then invalid provid
     assert.deepEqual(store.snapshot().settings, before);
   }
   assert.equal(parseSettings({ ...before, interests: '  Arrays and finance  ' }).interests, 'Arrays and finance');
+});
+
+test('given delayed evidence retained only in concept memory, when retention is a secondary purpose, then related evidence permits it without restoring full old lessons', async t => {
+  const store = temporaryStore(t);
+  finish(store, await commitDemo(store));
+  const context = store.context();
+  context.history = [];
+  const evidence = context.curriculum!.concepts[0].evidence[0];
+  evidence.answeredAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+  const proposal = createDemoLesson(context);
+  proposal.questions[0].plan!.purposes.push('retention');
+  proposal.rationale = `Revisit the related observation ${evidence.attemptId} after more than a day.`;
+  await validateLesson(proposal, context);
+  const unrelated = structuredClone(proposal.curriculum!.conceptUpdates[0]);
+  unrelated.id = 'another-concept';
+  unrelated.name = 'An unrelated concept';
+  proposal.curriculum!.conceptUpdates.push(unrelated);
+  proposal.questions[0].plan!.conceptIds = [unrelated.id];
+  await assert.rejects(validateLesson(proposal, context), /retention requires a related unflagged attempt/);
 });
 
 test('given a large lesson archive, when preparing bounded tutor context, then recent evidence survives without deleting history or keeping dropped citations', async t => {

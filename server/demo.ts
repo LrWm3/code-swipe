@@ -124,7 +124,7 @@ const EXAMPLES: Example[] = [
 
 export function createDemoLesson(context: TutorContext): ProposedLesson {
   const count = LESSON_SIZES.some(size => size === context.settings.batchSize) ? context.settings.batchSize : DEFAULT_LESSON_SIZE;
-  const questions: ProposedQuestion[] = EXAMPLES.slice(0, count).map(example => ({
+  const questions: ProposedQuestion[] = EXAMPLES.slice(0, count).map((example, index) => ({
     title: example.title,
     specification: example.specification,
     code: example.code,
@@ -137,12 +137,50 @@ export function createDemoLesson(context: TutorContext): ProposedLesson {
     ifCorrect: 'A correct judgment provides one observation; another independently designed question would be needed to assess this skill.',
     ifIncorrect: 'An incorrect judgment could reflect a boundary misconception, a reading slip, or a guess; one response cannot distinguish these explanations.',
     prediction: { pCorrect: 0.5, rationale: 'Neutral sample prediction. This deterministic demo does not estimate your skill or adapt from your history.' },
+    plan: {
+      purposes: [count - 1 === index ? 'transfer' : index === 1 ? 'practice' : 'diagnostic'],
+      educationalObjective: 'Practice checking a small function against its contract and boundary cases.',
+      investigativeObjective: 'Observe this judgment without claiming a particular reasoning strategy or capability.',
+      conceptIds: ['demo-code-review'], prerequisiteIds: [],
+      stage: index === 0 ? 'warmup' : index === count - 1 ? 'consolidate' : index >= Math.ceil(count / 2) ? 'stretch' : 'build',
+      cognitiveDemand: index === 0 ? 1 : index === count - 1 ? 2 : index >= Math.ceil(count / 2) ? 3 : 2,
+      difficultyRationale: 'A sample sequence moves from one comparison to combining operations, then finishes with a compact independent task. These are illustrative demands, not personalized estimates.',
+      scaffolding: 'The specification supplies the required behavior and boundary rules; no earlier explanation is required.',
+      ifIdk: 'Record uncertainty without inferring an incorrect rule or lack of ability.',
+      familyId: `demo-task-${index + 1}`, counterpart: 'unasked',
+      variantReason: 'Leave the opposite implementation unasked; use the reference for optional review rather than another copy of this task.',
+    },
   }));
+  for (const question of questions) question.purpose = question.plan!.purposes[0];
+  const prior = context.history.flatMap(entry => entry.attempts.filter(attempt => !attempt.flagged).map(attempt => ({
+    attempt, question: entry.lesson.questions.find(question => question.id === attempt.exerciseId),
+  }))).filter(item => item.question).at(-1);
+  const priorMemory = context.curriculum?.concepts.flatMap(concept => concept.evidence.map(evidence => ({ concept, evidence }))).at(-1);
   return {
     objective: 'Sample local practice: judge small JavaScript functions against explicit specifications.',
     rationale: 'These curated examples demonstrate the local practice and validation workflow. They are deterministic sample questions, not an LLM-generated adaptive lesson.',
     assumptions: ['You can read basic JavaScript functions and array operations.', 'Your proficiency and preferred difficulty are unknown; no skill claim is inferred from demo answers.'],
     reflection: 'Demo mode does not reflect on prior answers or adapt its question selection. Repeated demo sessions use the same curated examples.',
+    curriculum: {
+      conceptUpdates: [{
+        id: 'demo-code-review', name: 'JavaScript function review', description: 'Compare small pure functions with their stated contracts.',
+        representations: ['JavaScript functions'], prerequisiteIds: [], familiarity: 'unknown', evidenceAttemptIds: [],
+        uncertainty: 'The fixed demo does not infer familiarity from answers.', nextProbe: 'Use a connected tutor for an independently chosen next exercise.',
+      }],
+      observations: context.settings.tutorMode === 'baseline' ? [] : prior ? [{
+        attemptIds: [prior.attempt.id], conceptIds: prior.question?.plan?.conceptIds ?? ['demo-code-review'],
+        observation: `A previous response was recorded as ${prior.attempt.answer}.`,
+        interpretation: 'The scripted demo does not infer understanding or teaching effectiveness from this response.',
+        nextAction: 'Continue the fixed demo; use a connected tutor to adapt from evidence.',
+      }] : priorMemory ? [{
+        attemptIds: [priorMemory.evidence.attemptId], conceptIds: [priorMemory.concept.id],
+        observation: `An archived response was recorded as ${priorMemory.evidence.answer}.`,
+        interpretation: 'The scripted demo does not assess competence.', nextAction: 'Use a connected tutor for personalized planning.',
+      }] : [],
+      frontier: [{ conceptId: 'demo-code-review', decision: 'explore', reason: 'A fixed sample of small functions introduces the workflow without claiming a personalized frontier.' }],
+      mixRationale: 'Independent sample tasks combine diagnostic judgments, practice, and a final different-context transfer opportunity; no mirror pairs.',
+      sequenceRationale: 'Start with a single comparison, build toward multi-operation judgments, then consolidate with an independent task. This curated demo is not an adaptive curriculum.',
+    },
     hypotheses: context.settings.tutorMode === 'baseline' ? [] : [{
       id: 'demo-boundaries',
       claim: 'Boundary cases may be a useful starting point for practice; current evidence does not establish a misconception.',

@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, Code2, Download, Flag, FlaskConical, HelpCircle, LoaderCircle, Settings2, ShieldCheck, Sparkles, Terminal, X } from 'lucide-react';
 import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
-import type { Answer, AppState, Discussion, Hypothesis, Job, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
+import type { Answer, AppState, CurriculumPlan, Discussion, Hypothesis, Job, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
 import { flushReviewSessions, useAnswerClock, useReviewSync, useReviewTiming } from './ui';
 import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from './lesson-sizes';
 
@@ -123,6 +123,14 @@ function ReviewPanel({ review, pending, onFlag }: { review: Review; pending: boo
       <p>{question.prediction.rationale}</p>
       <p className="fine-print">pCorrect = {question.prediction.pCorrect.toFixed(2)} · {question.purpose} probe{question.hypothesisId ? ` · ${question.hypothesisId}` : ''}</p>
       <details className="plain-details"><summary>Tutor’s prewritten interpretation</summary><p>{attempt.correct === null ? "You chose IDK. This answer is ungraded; neither prewritten verdict interpretation applies." : attempt.correct ? question.ifCorrect : question.ifIncorrect}</p></details>
+      {question.plan && <details className="plain-details"><summary>Question intent</summary>
+        <p><span className="small-label">Educational objective</span>{question.plan.educationalObjective}</p>
+        <p><span className="small-label">What the tutor wanted to investigate</span>{question.plan.investigativeObjective}</p>
+        <p><span className="small-label">Purposes</span>{question.plan.purposes.join(' · ')}</p>
+        <p><span className="small-label">Stage and demand</span>{question.plan.stage} · demand {question.plan.cognitiveDemand}. {question.plan.difficultyRationale}</p>
+        <p><span className="small-label">Scaffolding</span>{question.plan.scaffolding}</p>
+        <p><span className="small-label">If you chose IDK</span>{question.plan.ifIdk}</p>
+      </details>}
     </div>
     <div className="flag-row"><div><strong>Question seems flawed?</strong><p className="fine-print">Flagging keeps this answer in your notebook and excludes it from scoring and tutor evidence.</p></div><button className={`button compact ${attempt.flagged ? 'flagged' : 'quiet'}`} onClick={() => onFlag(review)} disabled={pending} aria-pressed={attempt.flagged} data-testid="flag-attempt"><Flag size={15} />{attempt.flagged ? 'Excluded · undo' : 'Flag item'}</button></div>
   </div>;
@@ -141,6 +149,38 @@ function HypothesisCard({ hypothesis, reviews }: { hypothesis: Hypothesis; revie
   </div>;
 }
 
+function CurriculumDetails({ curriculum, reviews, lessonReviews }: { curriculum: CurriculumPlan; reviews: Review[]; lessonReviews: Review[] }) {
+  const conceptName = (id: string) => curriculum.conceptUpdates.find((concept) => concept.id === id)?.name || id;
+  const evidence = (ids: string[]) => ids.map((id) => {
+    const review = reviews.find((item) => item.attempt.id === id);
+    return <li key={id}>{review ? <>{review.question.title} — {resultLabel(review.attempt.correct)}{review.attempt.flagged ? ' (excluded)' : ''}</> : <code>{id}</code>}</li>;
+  });
+  return <details className="plain-details notebook-section"><summary>Curriculum planning details</summary>
+    <p className="fine-print">Intent was saved before this lesson. Observations below concern earlier answers; interpretations remain tentative.</p>
+    <p><span className="small-label">Why this mix</span>{curriculum.mixRationale}</p>
+    <p><span className="small-label">Why this sequence</span>{curriculum.sequenceRationale}</p>
+    {curriculum.frontier.length > 0 && <div className="notebook-section"><h3>Frontier decisions</h3><ul>{curriculum.frontier.map((item, index) => <li key={index}><strong>{conceptName(item.conceptId)} · {item.decision}</strong> — {item.reason}</li>)}</ul></div>}
+    {curriculum.conceptUpdates.length > 0 && <div className="notebook-section"><h3>Concept notes before this lesson</h3>{curriculum.conceptUpdates.map((concept) => <details className="plain-details" key={concept.id}><summary>{concept.name} · {concept.familiarity}</summary>
+      <p>{concept.description}</p>
+      <p><span className="small-label">Uncertainty</span>{concept.uncertainty}</p>
+      <p><span className="small-label">Prerequisites</span>{concept.prerequisiteIds.map(conceptName).join(', ') || 'None recorded.'}</p>
+      <p><span className="small-label">Representations</span>{concept.representations.join(', ') || 'None recorded.'}</p>
+      {concept.evidenceAttemptIds.length > 0 && <div><span className="small-label">Prior evidence</span><ul>{evidence(concept.evidenceAttemptIds)}</ul></div>}
+      <p><span className="small-label">Next probe</span>{concept.nextProbe}</p>
+    </details>)}</div>}
+    {curriculum.observations.length > 0 && <div className="notebook-section"><h3>Observations from prior answers</h3>{curriculum.observations.map((item, index) => <div className="hypothesis-card" key={index}>
+      <p className="fine-print">{item.conceptIds.map(conceptName).join(' · ')}</p>
+      <p><span className="small-label">Observed</span>{item.observation}</p>
+      <p><span className="small-label">Interpretation</span>{item.interpretation}</p>
+      <p><span className="small-label">Next action</span>{item.nextAction}</p>
+      {item.attemptIds.length > 0 && <details className="plain-details"><summary>Referenced answers</summary><ul>{evidence(item.attemptIds)}</ul></details>}
+    </div>)}</div>}
+    {lessonReviews.some((review) => review.question.plan) && <div className="notebook-section"><h3>Variants and deferred counterparts</h3>{lessonReviews.map(({ question }) => question.plan && <details className="plain-details" key={question.id}><summary>{question.title} · {question.plan.counterpart === 'in-lesson' ? 'counterpart in this lesson' : question.plan.counterpart === 'defer' ? 'counterpart deferred' : 'counterpart unasked'}</summary>
+      <p>{question.plan.variantReason}</p><p className="fine-print">Family: {question.plan.familyId}</p>
+    </details>)}</div>}
+  </details>;
+}
+
 function Notebook({ state, selectedId, onSelect, onReview, onPractice }: { state: AppState; selectedId: string | null; onSelect: (id: string) => void; onReview: (id: string) => void; onPractice: () => void }) {
   const ordered = [...state.lessons].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const selected = ordered.find((lesson) => lesson.id === selectedId) || ordered[0];
@@ -150,6 +190,7 @@ function Notebook({ state, selectedId, onSelect, onReview, onPractice }: { state
     {ordered.length === 0 ? <div className="panel empty-state"><BookOpen size={36} /><h2>A fresh notebook.</h2><p>Your first lesson will appear here.</p></div> : <div className="notebook-grid"><div className="lesson-list" aria-label="Lessons">{ordered.map((lesson, index) => <button key={lesson.id} onClick={() => onSelect(lesson.id)} className={`lesson-list-item ${selected?.id === lesson.id ? 'selected' : ''}`} aria-pressed={selected?.id === lesson.id}><span className="small-label">Lesson {ordered.length - index} · {PROVIDER_NAMES[lesson.provider]}</span><strong>{lesson.objective}</strong><span>{date(lesson.createdAt)}</span><span className="lesson-list-status">{lesson.answered}/{lesson.total} answers <Badge tone={lesson.complete ? 'green' : ''}>{lesson.complete ? 'Complete' : 'In progress'}</Badge></span></button>)}</div>
       {selected && <section className="panel notebook-detail"><div className="eyebrow">{PROVIDER_NAMES[selected.provider]} · {selected.tutorMode}</div><h2>{selected.objective}</h2><p>{selected.rationale}</p>
         {selected.complete ? <><div className="notebook-section"><h3>Reflection before this lesson</h3><p className="preserve-lines">{selected.reflection || 'No prior reflection recorded.'}</p></div><div className="notebook-section"><h3>Starting assumptions</h3>{selected.assumptions.length ? <ul>{selected.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p className="muted">No assumptions recorded.</p>}</div><div className="notebook-section"><h3>Working hypotheses</h3><p className="fine-print">These are tentative explanations, not fixed labels about you.</p>{selected.hypotheses.length ? selected.hypotheses.map((hypothesis) => <HypothesisCard key={hypothesis.id} hypothesis={hypothesis} reviews={state.reviews} />) : <p className="muted">No hypotheses recorded for this lesson.</p>}</div></> : <div className="notice">Finish this lesson to reveal its assumptions, reflection, and hypotheses.</div>}
+        {selected.complete && selected.curriculum && <CurriculumDetails curriculum={selected.curriculum} reviews={state.reviews} lessonReviews={reviews} />}
         {selected.feedback && <div className="notebook-section" data-testid="saved-lesson-feedback"><h3>Your lesson feedback</h3><p className="preserve-lines">{selected.feedback.text || 'No written feedback.'}</p><p className="fine-print">{selected.feedback.accidentalAttemptIds.length} accidental answers excluded · {date(selected.feedback.updatedAt)}</p></div>}
         {state.discussions.filter(item => item.lessonId === selected.id).map(item => <div className="notebook-section" key={item.id}><h3>Tutor conversation · {date(item.createdAt)}</h3>{item.feedbackText && <details className="plain-details"><summary>Feedback shared</summary><p className="preserve-lines">{item.feedbackText}</p></details>}<p className="preserve-lines">{item.reflection}</p>{item.questions.map(question => <div className="conversation-reply" key={question.id}><h4>{question.text}</h4><p className="preserve-lines">{question.answer ?? (question.skipped ? 'Skipped' : 'No reply yet')}</p></div>)}</div>)}
         <div className="notebook-section"><h3>Answers & committed predictions</h3>{reviews.length === 0 && <p className="muted">No answers yet.</p>}{reviews.map((review) => {

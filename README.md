@@ -34,6 +34,8 @@ The demo uses curated examples and neutral predictions. It is not adaptive. For 
 ## What this v1 does
 
 - Plans 6, 8, or 12 questions at a time (8 by default), with explicit assumptions, alternative explanations, and predictions.
+- Gives each question educational and investigative objectives, with multiple purposes such as practice, transfer, retention, frontier exploration, or checking a teaching strategy. Lessons record their mix, progression, cognitive demand, and scaffolding; planning checks reject missing or inconsistent annotations.
+- Builds durable concept evidence from the lesson archive, including familiarity, uncertainty, prerequisites, representations, and deferred variants. Each lesson includes at most one closely related pair for a new concept; other counterparts stay deferred or unasked with a reason.
 - Runs each reference solution and candidate against generated fixtures inside QuickJS, with time and memory limits. Failed batches get one repair attempt before being rejected.
 - Saves immutable plan artifacts before showing a question. Answers append to local history; retries do not duplicate them.
 - Records review openings and estimated active viewing time, so the tutor can account for explanations you chose to inspect. Background or unfocused time is paused.
@@ -41,13 +43,17 @@ The demo uses curated examples and neutral predictions. It is not adaptive. For 
 - Tracks Brier score and calibration separately for each provider and tutor mode. These measure prediction quality, not learning or mastery.
 - Offers a fresh-context baseline that gets the same generation and validation pipeline without learner history or persistent hypotheses.
 
+After a lesson, question reviews include optional intent details. Completed lessons reveal curriculum notes in **Notebook**, separating observed answers from the tutor's interpretation and proposed next action. Later observations build on archived evidence without rewriting earlier intent. These planning rules are experimental, not validated pedagogy or a mastery assessment.
+
+Existing lessons remain readable without curriculum annotations. Newly generated lessons include them; a current batch stays fixed, and answers or feedback influence the next lesson.
+
 Exercises are currently **pure, synchronous JavaScript functions** using JSON inputs and outputs. New lessons use short task descriptions and compact JSDoc type hints, favoring simple inputs over unnecessary object wrappers. These hints describe the contract; they do not add TypeScript runtime support. Additional languages remain future work. Tests are finite checks, not proofs: a generated specification, reference solution, or fixture can still be wrong. The flag button exists for that reason.
 
 ## Local data and model calls
 
 History lives in `.code-swipe/`, which Git ignores. The server listens on loopback only. Your browser needs no API key. Codex/OpenCode still sends lesson context to whichever model provider your CLI uses; those requests use your existing account and its normal limits or charges. “Local” describes the app and its storage, not necessarily inference.
 
-The tutor receives recent answered lessons, your lesson notes, optional conversations, review timings, and evidence supporting current hypotheses. Baseline mode receives none of that history. CLI tools, workspace instructions, and plugins are disabled for these planning calls; this app supplies the complete context. OpenCode's global configuration is isolated, so choose a model explicitly if its default is unsuitable. Existing CLI authentication remains in use.
+The tutor receives recent answered lessons, your lesson notes, optional conversations, review timings, evidence supporting current hypotheses, and concept evidence reconstructed from the archive so older concepts survive the recent-history window. Baseline mode receives none of that history. CLI tools, workspace instructions, and plugins are disabled for these planning calls; this app supplies the complete context. OpenCode's global configuration is isolated, so choose a model explicitly if its default is unsuitable. Existing CLI authentication remains in use.
 
 **Export record** downloads plans and raw answers, including answers for any unfinished lesson. Keep it private if you want to preserve the exercise. Back up the entire data directory to restore it; export is for inspection, not an import format. Run only one server against a given data directory.
 
