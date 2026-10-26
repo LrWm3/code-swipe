@@ -1,8 +1,10 @@
 # Code Swipe
 
-Read a coding problem, a corresponding solution and swipe left or right to identify if it was implemented correctly or not. 
+Train code review as a skill by reviewing code.
 
-Over time problems become more difficult, are presented in unusual forms, and attempt to match to your level of demonstrated knowledge. 
+Read a coding problem, a code snippet solving that problem, and swipe left or right to identify if the presented solution correctly implements the problem as specified or not. Review incorrect answers, see what was missed, and improve over time.
+
+Over time problems become more difficult, are presented in unusual forms, and attempt to match to your level of demonstrated knowledge so you can continue to learn as you go without needing to intentionally select concepts to master.
 
 ## Demo
 
