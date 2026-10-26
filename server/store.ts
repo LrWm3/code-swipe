@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync, chmodSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import type { AppState, Attempt, Lesson, LessonSummary, Metrics, ProposedLesson, ProviderStatus, Review, ReviewSession, LessonFeedback, Settings, StoreData, TutorContext, ValidationReport, Answer, Job } from '../src/types.ts';
+import type { AppState, Attempt, Lesson, LessonSummary, Metrics, ProposedLesson, ProviderStatus, Review, ReviewSession, LessonFeedback, Settings, StoreData, TutorContext, ValidationReport, Answer, Job, Discussion, DiscussionContext, ProposedDiscussion } from '../src/types.ts';
+import { parseDiscussionOutput } from './discussion.ts';
 
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -66,7 +67,8 @@ export class LocalStore {
         this.data.settings = parseSettings(this.data.settings);
         this.data.feedback ??= [];
         this.data.reviewSessions ??= [];
-        if (!Array.isArray(this.data.feedback) || !Array.isArray(this.data.reviewSessions)) throw new Error('Invalid feedback history.');
+        this.data.discussions ??= [];
+        if (!Array.isArray(this.data.feedback) || !Array.isArray(this.data.reviewSessions) || !Array.isArray(this.data.discussions)) throw new Error('Invalid feedback history.');
         for (const lesson of this.data.lessons) {
           if (lesson.predictionHash !== lessonHash(lesson)) throw new Error('A committed lesson has changed.');
           const artifact = JSON.parse(readFileSync(join(this.directory, 'plans', `${lesson.id}.json`), 'utf8')) as Lesson;
@@ -76,7 +78,7 @@ export class LocalStore {
         throw new Error(`Could not read local history at ${this.file}. Nothing was reset. Check state.backup.json and restore a matching set of plan files. ${error instanceof Error ? error.message : ''}`);
       }
     } else {
-      this.data = { version: 1, settings: { ...DEFAULT_SETTINGS }, lessons: [], attempts: [], feedback: [], reviewSessions: [] };
+      this.data = { version: 1, settings: { ...DEFAULT_SETTINGS }, lessons: [], attempts: [], feedback: [], reviewSessions: [], discussions: [] };
       this.persist();
     }
   }
@@ -200,6 +202,56 @@ export class LocalStore {
     });
   }
 
+  discussionContext(lessonId: string): DiscussionContext {
+    const lesson = this.data.lessons.find(item => item.id === lessonId);
+    if (!lesson) throw new AppError('Lesson not found.', 404);
+    if (lesson.id !== this.data.lessons.at(-1)?.id || this.pendingQuestion()) throw new AppError('Finish the current lesson before talking with your tutor.', 409);
+    if (this.data.settings.tutorMode !== 'reflective') throw new AppError('Choose reflective tutor mode to discuss your learning. Baseline mode keeps no learner history.', 409);
+    const tutor = this.context();
+    return structuredClone({ tutor, lesson,
+      attempts: this.data.attempts.filter(item => item.lessonId === lessonId),
+      feedback: this.data.feedback?.find(item => item.lessonId === lessonId) ?? null,
+      discussions: (tutor.discussions ?? []).filter(item => item.lessonId === lessonId),
+    });
+  }
+
+  commitDiscussion(lessonId: string, proposal: ProposedDiscussion): Discussion {
+    const context = this.discussionContext(lessonId);
+    const checked = parseDiscussionOutput(JSON.stringify(proposal));
+    const discussion: Discussion = { id: randomUUID(), lessonId, createdAt: new Date().toISOString(),
+      provider: context.tutor.settings.provider, model: context.tutor.settings.model,
+      feedbackText: context.feedback?.text ?? '', reflection: checked.reflection,
+      questions: checked.questions.map(text => ({ id: randomUUID(), text, answer: null, skipped: false })),
+    };
+    this.update({ ...this.data, discussions: [...(this.data.discussions ?? []), discussion] });
+    return structuredClone(discussion);
+  }
+
+  saveDiscussionReplies(id: string, input: unknown) {
+    const discussion = this.data.discussions?.find(item => item.id === id);
+    if (!discussion) throw new AppError('Tutor conversation not found.', 404);
+    const replies = (input as { replies?: { questionId: string; answer: string }[] } | null)?.replies;
+    if (!Array.isArray(replies) || replies.length !== discussion.questions.length || new Set(replies.map(item => item?.questionId)).size !== replies.length
+      || replies.some(item => !item || !discussion.questions.some(question => question.id === item.questionId) || typeof item.answer !== 'string' || item.answer.length > 4000)) {
+      throw new AppError('Send one reply per follow-up question, up to 4,000 characters each. Leave a reply blank to skip it.');
+    }
+    this.update({ ...this.data, discussions: this.data.discussions!.map(item => item.id === id ? {
+      ...item, repliedAt: new Date().toISOString(), questions: item.questions.map(question => {
+        const answer = replies.find(reply => reply.questionId === question.id)!.answer.trim();
+        return { ...question, answer: answer || null, skipped: !answer };
+      }),
+    } : item) });
+  }
+
+  skipUnansweredDiscussions() {
+    const lessonId = this.data.lessons.at(-1)?.id;
+    const discussions = this.data.discussions ?? [];
+    if (!discussions.some(item => item.lessonId === lessonId && item.questions.some(question => question.answer === null && !question.skipped))) return;
+    this.update({ ...this.data, discussions: discussions.map(item => item.lessonId === lessonId ? {
+      ...item, questions: item.questions.map(question => question.answer === null ? { ...question, skipped: true } : question),
+    } : item) });
+  }
+
   private review(attempt: Attempt): Review {
     const lesson = this.data.lessons.find(item => item.id === attempt.lessonId)!;
     const question = lesson.questions.find(item => item.id === attempt.exerciseId)!;
@@ -209,7 +261,7 @@ export class LocalStore {
   context(): TutorContext {
     const history = this.data.lessons.map(lesson => ({ lesson, attempts: this.data.attempts.filter(item => item.lessonId === lesson.id && !item.flagged) }));
     if (this.data.settings.tutorMode === 'baseline') {
-      return { settings: { ...this.data.settings }, history: [], hypotheses: [], reviewSessions: [], feedback: [], metrics: calculateMetrics({ ...this.data, lessons: [], attempts: [] }) };
+      return { settings: { ...this.data.settings }, history: [], hypotheses: [], reviewSessions: [], feedback: [], discussions: [], metrics: calculateMetrics({ ...this.data, lessons: [], attempts: [] }) };
     }
     const hypotheses = this.data.lessons.at(-1)?.hypotheses ?? [];
     const evidence = new Set(hypotheses.flatMap(item => [...item.supportingAttemptIds, ...item.counterevidenceAttemptIds]));
@@ -219,7 +271,10 @@ export class LocalStore {
     while (selected.length > 1 && Buffer.byteLength(JSON.stringify(selected)) > 280_000) selected.shift();
     const knownIds = new Set(selected.flatMap(item => item.attempts.map(attempt => attempt.id)));
     const knownLessons = new Set(selected.map(item => item.lesson.id));
+    const discussions = (this.data.discussions ?? []).filter(item => knownLessons.has(item.lessonId)).slice(-12);
+    while (discussions.length > 1 && Buffer.byteLength(JSON.stringify(discussions)) > 48_000) discussions.shift();
     return { settings: { ...this.data.settings }, history: structuredClone(selected),
+      discussions: structuredClone(discussions),
       feedback: structuredClone((this.data.feedback ?? []).filter(item => knownLessons.has(item.lessonId))),
       reviewSessions: structuredClone((this.data.reviewSessions ?? []).filter(item => knownIds.has(item.attemptId))),
       hypotheses: hypotheses.map(item => {
@@ -253,6 +308,6 @@ export class LocalStore {
       lessons: [...summaries].reverse(), reviews: [...this.data.attempts].reverse().map(item => this.review(item)),
       hypotheses: summaries.filter(item => item.complete).at(-1)?.hypotheses ?? [],
       metrics: calculateMetrics(this.data, this.data.settings), dataDirectory: this.directory,
-      reviewSessions: this.data.reviewSessions ?? [], feedback: this.data.feedback ?? [] });
+      reviewSessions: this.data.reviewSessions ?? [], feedback: this.data.feedback ?? [], discussions: this.data.discussions ?? [] });
   }
 }

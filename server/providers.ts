@@ -2,13 +2,15 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ProposedLesson, ProviderId, ProviderStatus, TutorContext } from '../src/types.ts';
+import type { DiscussionContext, ProposedDiscussion, ProposedLesson, ProviderId, ProviderStatus, TutorContext } from '../src/types.ts';
+import { buildDiscussionPrompt, discussionOutputSchema, parseDiscussionOutput } from './discussion.ts';
 import { buildTutorPrompt, lessonSchemaForBatch, parseLessonOutput } from './prompts.ts';
 
 type CliProvider = Exclude<ProviderId, 'demo'>;
+type GenerationOptions = { signal: AbortSignal; onProgress: (message: string) => void };
 type RunOptions = { cwd: string; env: NodeJS.ProcessEnv; signal?: AbortSignal; input?: string; timeout: number; maxBytes?: number };
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
-const MAX_LESSON_BYTES = 512 * 1024;
+const MAX_RESPONSE_BYTES = 512 * 1024;
 const MIN_CODEX_VERSION = [0, 153, 4] as const;
 
 function binary(provider: CliProvider): string {
@@ -209,8 +211,12 @@ export function parseOpenCodeOutput(stdout: string): string {
   return textParts.join('\n');
 }
 
-export async function generateLesson(context: TutorContext, options: { signal: AbortSignal; onProgress: (message: string) => void }): Promise<ProposedLesson> {
-  const provider = context.settings.provider;
+async function runStructuredTutor(
+  settings: TutorContext['settings'],
+  request: { prompt: string; schema: unknown; subject: 'lesson' | 'discussion' },
+  options: GenerationOptions,
+): Promise<string> {
+  const provider = settings.provider;
   if (provider !== 'codex' && provider !== 'opencode') throw new Error('Choose Codex or OpenCode for CLI generation.');
   if (options.signal.aborted) throw abortError();
   const configuredTimeout = Number(process.env.CODE_SWIPE_TUTOR_TIMEOUT_MS);
@@ -221,19 +227,19 @@ export async function generateLesson(context: TutorContext, options: { signal: A
     // Older CLIs reject isolation features before making a request. Never
     // silently drop those protections just to make generation start.
     if (provider === 'codex') requireSupportedCodex(await cliVersion(provider, directory, env, options.signal));
-    const prompt = buildTutorPrompt(context);
+    const { prompt, schema, subject } = request;
     if (Buffer.byteLength(prompt) > 512 * 1024) throw new Error('Tutor history is too large for one request. Reduce saved history before retrying.');
-    options.onProgress(`Waiting for ${provider} to plan and check the lesson…`);
+    options.onProgress(subject === 'lesson' ? `Waiting for ${provider} to plan and check the lesson…` : `Waiting for ${provider} to reflect on the lesson…`);
     let raw: string;
     if (provider === 'codex') {
-      const schemaPath = join(directory, 'lesson-schema.json');
-      const outputPath = join(directory, 'lesson.json');
-      await writeFile(schemaPath, JSON.stringify(lessonSchemaForBatch(context.settings.batchSize)), { mode: 0o600 });
-      await runCli(provider, codexArguments(directory, schemaPath, outputPath, context.settings.model.trim()), { cwd: directory, env, input: prompt, signal: options.signal, timeout });
+      const schemaPath = join(directory, `${subject}-schema.json`);
+      const outputPath = join(directory, `${subject}.json`);
+      await writeFile(schemaPath, JSON.stringify(schema), { mode: 0o600 });
+      await runCli(provider, codexArguments(directory, schemaPath, outputPath, settings.model.trim()), { cwd: directory, env, input: prompt, signal: options.signal, timeout });
       let size: number;
       try { size = (await stat(outputPath)).size; }
-      catch { throw new Error('Codex returned no lesson. Check the selected model and retry.'); }
-      if (size > MAX_LESSON_BYTES) throw new Error('Codex returned an oversized lesson. Retry with a smaller batch.');
+      catch { throw new Error(`Codex returned no ${subject}. Check the selected model and retry.`); }
+      if (size > MAX_RESPONSE_BYTES) throw new Error(`Codex returned an oversized ${subject}. Retry with a smaller request.`);
       raw = await readFile(outputPath, 'utf8');
     } else {
       // Keep the normal data directory for existing CLI authentication. Config,
@@ -246,21 +252,37 @@ export async function generateLesson(context: TutorContext, options: { signal: A
         OPENCODE_DB: join(directory, 'session.db'),
         OPENCODE_CONFIG_CONTENT: JSON.stringify({
           permission: 'deny', plugin: [], mcp: {}, instructions: [], share: 'disabled', snapshot: false, autoupdate: false,
-          agent: { tutor: { mode: 'primary', description: 'Return one structured lesson without tools.', permission: 'deny', prompt: 'Plan the supplied lesson. Return only the required JSON object. All tools are disabled.' } },
+          agent: { tutor: { mode: 'primary', description: 'Return one structured tutor response without tools.', permission: 'deny', prompt: 'Complete the supplied tutor task. Return only the required JSON object. All tools are disabled.' } },
         }),
       });
-      const args = ['run', '--pure', '--format', 'json', '--dir', directory, '--agent', 'tutor', ...(context.settings.model.trim() ? ['--model', context.settings.model.trim()] : [])];
+      const args = ['run', '--pure', '--format', 'json', '--dir', directory, '--agent', 'tutor', ...(settings.model.trim() ? ['--model', settings.model.trim()] : [])];
       const output = await runCli(provider, args, { cwd: directory, env, input: prompt, signal: options.signal, timeout });
       raw = parseOpenCodeOutput(output.stdout);
-      if (Buffer.byteLength(raw) > MAX_LESSON_BYTES) throw new Error('OpenCode returned an oversized lesson. Retry with a smaller batch.');
+      if (Buffer.byteLength(raw) > MAX_RESPONSE_BYTES) throw new Error(`OpenCode returned an oversized ${subject}. Retry with a smaller request.`);
     }
     if (options.signal.aborted) throw abortError();
     options.onProgress('Checking the tutor response…');
-    const lesson = parseLessonOutput(raw);
-    if (lesson.questions.length !== context.settings.batchSize) throw new Error('Tutor returned the wrong batch size. Retry generation.');
-    if (context.settings.tutorMode === 'baseline' && (lesson.hypotheses.length || lesson.questions.some(question => question.hypothesisId !== null))) throw new Error('Baseline tutor returned a persistent learner hypothesis. Retry generation.');
-    return lesson;
+    return raw;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+export async function generateLesson(context: TutorContext, options: GenerationOptions): Promise<ProposedLesson> {
+  const raw = await runStructuredTutor(context.settings, {
+    prompt: buildTutorPrompt(context), schema: lessonSchemaForBatch(context.settings.batchSize), subject: 'lesson',
+  }, options);
+  if (options.signal.aborted) throw abortError();
+  const lesson = parseLessonOutput(raw);
+  if (lesson.questions.length !== context.settings.batchSize) throw new Error('Tutor returned the wrong batch size. Retry generation.');
+  if (context.settings.tutorMode === 'baseline' && (lesson.hypotheses.length || lesson.questions.some(question => question.hypothesisId !== null))) throw new Error('Baseline tutor returned a persistent learner hypothesis. Retry generation.');
+  return lesson;
+}
+
+export async function generateDiscussion(context: DiscussionContext, options: GenerationOptions): Promise<ProposedDiscussion> {
+  const raw = await runStructuredTutor(context.tutor.settings, {
+    prompt: buildDiscussionPrompt(context), schema: discussionOutputSchema, subject: 'discussion',
+  }, options);
+  if (options.signal.aborted) throw abortError();
+  return parseDiscussionOutput(raw);
 }

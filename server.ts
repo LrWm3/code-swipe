@@ -28,7 +28,7 @@ export function createApp(service: TutorService) {
     if (!['GET', 'HEAD'].includes(req.method) && !req.is('application/json')) return res.status(415).json({ error: 'Send JSON for API changes.' });
     next();
   });
-  app.use(express.json({ limit: '32kb' }));
+  app.use(express.json({ limit: '64kb' }));
   app.get('/api/state', (_req, res) => res.json(service.state()));
   app.put('/api/settings', (req, res) => { service.saveSettings(req.body); res.json(service.state()); });
   app.post('/api/plan', (_req, res) => { service.plan(); res.status(202).json(service.state()); });
@@ -48,6 +48,15 @@ export function createApp(service: TutorService) {
   app.post('/api/lessons/:id/feedback', (req, res) => {
     service.requireIdle();
     service.store.saveFeedback(req.params.id, req.body);
+    res.json(service.state());
+  });
+  app.post('/api/lessons/:id/discuss', (req, res) => {
+    service.discuss(req.params.id);
+    res.status(202).json(service.state());
+  });
+  app.post('/api/discussions/:id/replies', (req, res) => {
+    service.requireIdle();
+    service.store.saveDiscussionReplies(req.params.id, req.body);
     res.json(service.state());
   });
   app.get('/api/export', (_req, res) => {

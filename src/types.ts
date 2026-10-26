@@ -85,6 +85,34 @@ export interface LessonFeedback {
   accidentalAttemptIds: string[];
   updatedAt: string;
 }
+export interface ProposedDiscussion {
+  reflection: string;
+  questions: string[];
+}
+export interface DiscussionQuestion {
+  id: string;
+  text: string;
+  answer: string | null;
+  skipped: boolean;
+}
+export interface Discussion {
+  id: string;
+  lessonId: string;
+  createdAt: string;
+  provider: ProviderId;
+  model: string;
+  feedbackText: string;
+  reflection: string;
+  questions: DiscussionQuestion[];
+  repliedAt?: string;
+}
+export interface DiscussionContext {
+  tutor: TutorContext;
+  lesson: Lesson;
+  attempts: Attempt[];
+  feedback: LessonFeedback | null;
+  discussions: Discussion[];
+}
 export interface StoreData {
   version: 1;
   settings: Settings;
@@ -92,6 +120,7 @@ export interface StoreData {
   attempts: Attempt[];
   reviewSessions?: ReviewSession[];
   feedback?: LessonFeedback[];
+  discussions?: Discussion[];
 }
 export interface ProviderStatus { id: ProviderId; available: boolean; version: string; detail: string }
 export interface TutorContext {
@@ -101,6 +130,7 @@ export interface TutorContext {
   metrics: Metrics;
   reviewSessions?: ReviewSession[];
   feedback?: LessonFeedback[];
+  discussions?: Discussion[];
   repair?: string[];
   draft?: ProposedLesson;
 }
@@ -110,6 +140,8 @@ export interface Job {
   stage: string;
   startedAt: string;
   message: string;
+  kind?: 'lesson' | 'discussion';
+  lessonId?: string;
 }
 export interface CalibrationBin { label: string; count: number; predicted: number | null; actual: number | null }
 export interface Metrics {
@@ -163,4 +195,5 @@ export interface AppState {
   dataDirectory: string;
   reviewSessions: ReviewSession[];
   feedback: LessonFeedback[];
+  discussions: Discussion[];
 }

@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, Code2, Download, Flag, FlaskConical, HelpCircle, LoaderCircle, Settings2, ShieldCheck, Sparkles, Terminal, X } from 'lucide-react';
 import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
-import type { Answer, AppState, Hypothesis, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
+import type { Answer, AppState, Discussion, Hypothesis, Job, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
 import { flushReviewSessions, useAnswerClock, useReviewSync, useReviewTiming } from './ui';
 
 hljs.registerLanguage('javascript', javascript);
@@ -138,6 +138,7 @@ function Notebook({ state, selectedId, onSelect, onReview, onPractice }: { state
       {selected && <section className="panel notebook-detail"><div className="eyebrow">{PROVIDER_NAMES[selected.provider]} · {selected.tutorMode}</div><h2>{selected.objective}</h2><p>{selected.rationale}</p>
         {selected.complete ? <><div className="notebook-section"><h3>Reflection before this lesson</h3><p className="preserve-lines">{selected.reflection || 'No prior reflection recorded.'}</p></div><div className="notebook-section"><h3>Starting assumptions</h3>{selected.assumptions.length ? <ul>{selected.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p className="muted">No assumptions recorded.</p>}</div><div className="notebook-section"><h3>Working hypotheses</h3><p className="fine-print">These are tentative explanations, not fixed labels about you.</p>{selected.hypotheses.length ? selected.hypotheses.map((hypothesis) => <HypothesisCard key={hypothesis.id} hypothesis={hypothesis} reviews={state.reviews} />) : <p className="muted">No hypotheses recorded for this lesson.</p>}</div></> : <div className="notice">Finish this lesson to reveal its assumptions, reflection, and hypotheses.</div>}
         {selected.feedback && <div className="notebook-section" data-testid="saved-lesson-feedback"><h3>Your lesson feedback</h3><p className="preserve-lines">{selected.feedback.text || 'No written feedback.'}</p><p className="fine-print">{selected.feedback.accidentalAttemptIds.length} accidental answers excluded · {date(selected.feedback.updatedAt)}</p></div>}
+        {state.discussions.filter(item => item.lessonId === selected.id).map(item => <div className="notebook-section" key={item.id}><h3>Tutor conversation · {date(item.createdAt)}</h3>{item.feedbackText && <details className="plain-details"><summary>Feedback shared</summary><p className="preserve-lines">{item.feedbackText}</p></details>}<p className="preserve-lines">{item.reflection}</p>{item.questions.map(question => <div className="conversation-reply" key={question.id}><h4>{question.text}</h4><p className="preserve-lines">{question.answer ?? (question.skipped ? 'Skipped' : 'No reply yet')}</p></div>)}</div>)}
         <div className="notebook-section"><h3>Answers & committed predictions</h3>{reviews.length === 0 && <p className="muted">No answers yet.</p>}{reviews.map((review) => {
           const sessions = (state.reviewSessions || []).filter((session) => session.attemptId === review.attempt.id);
           return <button className="answer-history answer-history-button" key={review.attempt.id} onClick={() => onReview(review.attempt.id)} data-testid="notebook-review" data-attempt-id={review.attempt.id}><span className={`answer-dot ${review.attempt.correct === null ? 'neutral' : review.attempt.correct ? 'green' : 'red'}`} /><span>{review.question.title}<small>{answerLabel(review.attempt.answer)} · {resultLabel(review.attempt.correct)} · {percent(review.question.prediction.pCorrect)} predicted{review.attempt.flagged ? ` · ${review.attempt.exclusionReason === 'accidental-input' ? 'accidental input' : 'flagged'}; excluded` : ''}</small><small>{sessions.length ? `${sessions.length} review ${sessions.length === 1 ? 'opening' : 'openings'} · ${(sessions.reduce((total, session) => total + session.activeMs, 0) / 1000).toFixed(1)}s active` : 'No recorded review'}</small></span><ChevronRight size={16} /></button>;
@@ -162,7 +163,17 @@ function ReviewDialog({ review, pending, error, onFlag, onClose }: { review: Rev
   </dialog>;
 }
 
-type FeedbackDraft = Pick<LessonFeedback, 'text' | 'accidentalAttemptIds'>;
+type ReplyDraft = { discussionId: string; replies: { questionId: string; answer: string }[] };
+type FeedbackDraft = Pick<LessonFeedback, 'text' | 'accidentalAttemptIds'> & { followUp?: ReplyDraft };
+function readReplyDraft(discussion?: Discussion): ReplyDraft | undefined {
+  if (!discussion) return;
+  let saved: ReplyDraft | undefined;
+  try { saved = JSON.parse(localStorage.getItem(`code-swipe-replies:${discussion.id}`) || 'null'); } catch { /* Use server replies. */ }
+  return { discussionId: discussion.id, replies: discussion.questions.map(question => {
+    const draft = Array.isArray(saved?.replies) ? saved.replies.find(item => item?.questionId === question.id)?.answer : undefined;
+    return { questionId: question.id, answer: typeof draft === 'string' ? draft.slice(0, 4000) : question.answer || '' };
+  }) };
+}
 function readFeedbackDraft(lesson: LessonSummary, reviews: Review[]): FeedbackDraft {
   try {
     const saved = JSON.parse(localStorage.getItem(`code-swipe-feedback:${lesson.id}`) || 'null');
@@ -170,20 +181,46 @@ function readFeedbackDraft(lesson: LessonSummary, reviews: Review[]): FeedbackDr
   } catch { /* Server feedback remains the default when browser storage is unavailable. */ }
   return { text: lesson.feedback?.text || '', accidentalAttemptIds: lesson.feedback?.accidentalAttemptIds || reviews.filter((item) => item.attempt.exclusionReason === 'accidental-input').map((item) => item.attempt.id) };
 }
-function LessonComplete({ lesson, reviews, pending, canPlan, onSave, onNext, onNotebook }: { lesson: LessonSummary; reviews: Review[]; pending: string; canPlan: boolean; onSave: (draft: FeedbackDraft) => void; onNext: (draft: FeedbackDraft) => void; onNotebook: () => void }) {
+function LessonComplete({ lesson, reviews, discussion, job, pending, canPlan, reflective, onSave, onDiscuss, onCancel, onNext, onNotebook }: {
+  lesson: LessonSummary; reviews: Review[]; discussion?: Discussion; job: Job | null; pending: string; canPlan: boolean; reflective: boolean;
+  onSave: (draft: FeedbackDraft) => void; onDiscuss: (draft: FeedbackDraft) => void; onCancel: () => void; onNext: (draft: FeedbackDraft) => void; onNotebook: () => void;
+}) {
   const [initial] = useState(() => readFeedbackDraft(lesson, reviews));
   const [text, setText] = useState(initial.text);
   const [accidentalAttemptIds, setAccidentalAttemptIds] = useState(initial.accidentalAttemptIds);
+  const [replyDraft, setReplyDraft] = useState(() => readReplyDraft(discussion));
+  useEffect(() => { setReplyDraft(readReplyDraft(discussion)); }, [discussion?.id]);
+  useEffect(() => {
+    if (!replyDraft) return;
+    try { localStorage.setItem(`code-swipe-replies:${replyDraft.discussionId}`, JSON.stringify(replyDraft)); } catch { /* Keep the visible draft. */ }
+  }, [replyDraft]);
   useEffect(() => {
     try { localStorage.setItem(`code-swipe-feedback:${lesson.id}`, JSON.stringify({ text, accidentalAttemptIds })); } catch { /* The visible draft can still be saved through the server. */ }
   }, [lesson.id, text, accidentalAttemptIds]);
-  const draft = { text, accidentalAttemptIds };
+  const followUp = replyDraft?.discussionId === discussion?.id ? replyDraft : readReplyDraft(discussion);
+  const draft = { text, accidentalAttemptIds, followUp };
+  const discussing = job?.kind === 'discussion' && job.status === 'running';
+  const disabled = Boolean(pending) || discussing;
+  const repliesChanged = discussion?.questions.some(question => {
+    const answer = followUp?.replies.find(item => item.questionId === question.id)?.answer.trim() || '';
+    return answer !== (question.answer || '') || (!answer && !question.skipped);
+  });
   const changed = text !== (lesson.feedback?.text || '') || [...accidentalAttemptIds].sort().join() !== [...(lesson.feedback?.accidentalAttemptIds || [])].sort().join();
   return <section className="panel lesson-complete" data-testid="lesson-complete"><div className="completion-heading"><CheckCircle2 size={24} /><div><h1>Lesson complete</h1><p className="muted">{lesson.total} cards saved.</p></div></div>
-    <label htmlFor="lesson-feedback">Anything your tutor should know? <span className="label-note">Optional</span></label><textarea id="lesson-feedback" data-testid="lesson-feedback" rows={3} maxLength={4000} value={text} onChange={(event) => setText(event.target.value)} placeholder="What felt easy, confusing, or worth revisiting?" disabled={Boolean(pending)} />
-    <details className="plain-details accidental-details"><summary>Mark accidental answers</summary><p className="fine-print">Exclude a misclick or unintended swipe from scoring and tutor evidence. Your original answer stays in your notebook.</p><div className="accidental-answers">{reviews.map((review) => <label key={review.attempt.id}><input type="checkbox" data-testid="accidental-answer" value={review.attempt.id} checked={accidentalAttemptIds.includes(review.attempt.id)} disabled={Boolean(pending)} onChange={(event) => setAccidentalAttemptIds((ids) => event.target.checked ? [...ids, review.attempt.id] : ids.filter((id) => id !== review.attempt.id))} /><span>{review.question.title}<small>Chose {answerLabel(review.attempt.answer)}</small></span></label>)}</div></details>
-    <div className="feedback-save"><span className="fine-print" role="status">{pending === 'feedback' ? 'Saving feedback…' : changed ? 'Saved before your next lesson.' : lesson.feedback ? 'Feedback saved.' : 'Feedback is optional.'}</span><button className="button compact quiet" onClick={() => onSave(draft)} disabled={Boolean(pending) || !changed} data-testid="save-feedback">Save feedback</button></div>
-    <div className="completion-actions"><button className="button primary" onClick={() => onNext(draft)} disabled={Boolean(pending) || !canPlan} data-testid="start-lesson">{pending === 'start' ? <LoaderCircle className="spin" size={18} /> : <Sparkles size={18} />}Next lesson<ArrowRight size={18} /></button><button className="button quiet" onClick={onNotebook} disabled={Boolean(pending)}>Open notebook</button></div>
+    <label htmlFor="lesson-feedback">Anything your tutor should know? <span className="label-note">Optional</span></label>
+    <p className="feedback-help fine-print">Share anything: how you reasoned, what confused you, corrections, pacing, or what you want next. Your tutor can reconsider its assumptions using your feedback.</p>
+    <textarea id="lesson-feedback" data-testid="lesson-feedback" rows={3} maxLength={4000} value={text} onChange={(event) => setText(event.target.value)} placeholder="For example: I understood the loop, but guessed because the input shape was unclear. I'd like more networking examples." disabled={disabled} />
+    <details className="plain-details accidental-details"><summary>Mark accidental answers</summary><p className="fine-print">Exclude a misclick or unintended swipe from scoring and tutor evidence. Your original answer stays in your notebook.</p><div className="accidental-answers">{reviews.map((review) => <label key={review.attempt.id}><input type="checkbox" data-testid="accidental-answer" value={review.attempt.id} checked={accidentalAttemptIds.includes(review.attempt.id)} disabled={disabled} onChange={(event) => setAccidentalAttemptIds((ids) => event.target.checked ? [...ids, review.attempt.id] : ids.filter((id) => id !== review.attempt.id))} /><span>{review.question.title}<small>Chose {answerLabel(review.attempt.answer)}</small></span></label>)}</div></details>
+    <div className="feedback-save"><span className="fine-print" role="status">{pending === 'feedback' ? 'Saving feedback…' : changed ? 'Saved before your next lesson.' : lesson.feedback ? 'Feedback saved.' : 'Feedback is optional.'}</span><button className="button compact quiet" onClick={() => onSave(draft)} disabled={disabled || !changed} data-testid="save-feedback">Save feedback</button></div>
+    {reflective ? <div className="tutor-feedback-actions"><button className="button quiet" onClick={() => onDiscuss(draft)} disabled={disabled || !canPlan} data-testid="discuss-feedback"><Sparkles size={17} />{discussion ? 'Update tutor' : 'Send to tutor'}</button><p className="fine-print">Get a response and optional follow-up questions, or go straight to the next lesson.</p></div> : <p className="fine-print feedback-help">Baseline mode saves your notes but does not use learner history. Choose reflective mode in Setup for tutor conversations.</p>}
+    {discussing && <div className="notice discussion-progress" role="status"><LoaderCircle className="spin" size={18} /><div><strong>Your tutor is thinking…</strong><p>You can continue without waiting.</p></div><button className="button compact quiet" onClick={onCancel} disabled={Boolean(pending)}>Cancel</button></div>}
+    {discussion && <section className="tutor-discussion" data-testid="tutor-discussion"><h2>Tutor’s take</h2><p className="preserve-lines">{discussion.reflection}</p>
+      {discussion.questions.length > 0 ? <><h3>Optional follow-up</h3><p className="fine-print">Answer any you want. Blank replies are skipped, with no penalty. Replies are saved before your next lesson.</p>
+        {discussion.questions.map(question => <div className="follow-up-question" key={question.id}><label htmlFor={`reply-${question.id}`}>{question.text}{' '}<span className="label-note">Optional</span></label><textarea id={`reply-${question.id}`} data-testid="follow-up-answer" rows={2} maxLength={4000} disabled={disabled} value={followUp?.replies.find(item => item.questionId === question.id)?.answer || ''} placeholder={question.skipped ? 'Skipped — you can still answer if you want.' : 'Reply, or leave blank to skip.'} onChange={event => setReplyDraft({ discussionId: discussion.id, replies: (followUp?.replies || []).map(item => item.questionId === question.id ? { ...item, answer: event.target.value } : item) })} /></div>)}
+        <button className="button compact quiet" disabled={disabled || !repliesChanged} onClick={() => onSave(draft)} data-testid="save-replies">{repliesChanged ? 'Save replies / skip blanks' : 'Replies saved'}</button>
+      </> : <p className="fine-print">No follow-up needed. You can add more feedback or continue.</p>}
+    </section>}
+    <div className="completion-actions"><button className="button primary" onClick={() => onNext(draft)} disabled={Boolean(pending) || !canPlan} data-testid="start-lesson">{pending === 'start' ? <LoaderCircle className="spin" size={18} /> : <ArrowRight size={18} />}{discussing ? 'Skip follow-up & next lesson' : 'Next lesson'}</button><button className="button quiet" onClick={onNotebook} disabled={Boolean(pending)}>Open notebook</button></div>
   </section>;
 }
 
@@ -224,6 +261,7 @@ export default function App() {
   const review = state?.reviews.find((item) => item.attempt.id === reviewId) || null;
   const lastReview = state?.reviews.find((item) => item.attempt.id === lastReviewId) || state?.reviews[0] || null;
   const running = state?.job?.status === 'running';
+  const discussing = running && state?.job?.kind === 'discussion';
   const chosenProvider = state?.providers.find((provider) => provider.id === state.settings.provider);
   const readAnswerTime = useAnswerClock(state?.question?.id, view === 'practice' && !review && !pending);
 
@@ -298,16 +336,26 @@ export default function App() {
   }, [refresh]);
 
   const saveFeedback = async (lessonId: string, draft: FeedbackDraft) => {
-    const next = await api<AppState>(`/api/lessons/${encodeURIComponent(lessonId)}/feedback`, 'POST', draft);
+    const next = await api<AppState>(`/api/lessons/${encodeURIComponent(lessonId)}/feedback`, 'POST', { text: draft.text, accidentalAttemptIds: draft.accidentalAttemptIds });
     acceptState(next);
   };
+  const saveCompletion = async (draft: FeedbackDraft) => {
+    if (!state?.currentLesson?.complete) return;
+    const existing = state.currentLesson.feedback;
+    if (draft.text !== (existing?.text || '') || [...draft.accidentalAttemptIds].sort().join() !== [...(existing?.accidentalAttemptIds || [])].sort().join()) await saveFeedback(state.currentLesson.id, draft);
+    if (draft.followUp) acceptState(await api<AppState>(`/api/discussions/${encodeURIComponent(draft.followUp.discussionId)}/replies`, 'POST', { replies: draft.followUp.replies }));
+  };
+  const discussFeedback = (draft: FeedbackDraft) => mutate('discuss', async () => {
+    if (!state?.currentLesson) return;
+    await saveCompletion(draft);
+    if (!(await flushReviewSessions())) throw new Error('Review timing is waiting to sync. Reconnect and try again.');
+    acceptState(await api<AppState>(`/api/lessons/${encodeURIComponent(state.currentLesson.id)}/discuss`, 'POST'));
+  });
   const startLesson = (demo = false, draft?: FeedbackDraft) => mutate('start', async () => {
     if (!state) return;
+    if (discussing) acceptState(await api<AppState>('/api/cancel', 'POST'));
     if (!(await flushReviewSessions())) throw new Error('Review timing is waiting to sync. Reconnect and try again.');
-    if (draft && state.currentLesson?.complete) {
-      const existing = state.currentLesson.feedback;
-      if (draft.text !== (existing?.text || '') || [...draft.accidentalAttemptIds].sort().join() !== [...(existing?.accidentalAttemptIds || [])].sort().join()) await saveFeedback(state.currentLesson.id, draft);
-    }
+    if (draft) await saveCompletion(draft);
     if (demo && state.settings.provider !== 'demo') acceptState(await api<AppState>('/api/settings', 'PUT', { ...state.settings, provider: 'demo' }));
     acceptState(await api<AppState>('/api/plan', 'POST'));
     setReviewId(null);
@@ -385,11 +433,11 @@ export default function App() {
             </article></div>
             <div className="answer-buttons"><button className="answer-button buggy" onClick={() => void submit('buggy')} disabled={answerDisabled} data-testid="answer-buggy"><X size={20} /><span>Buggy</span><kbd>←</kbd></button><button className="answer-button unsure" onClick={() => void submit('idk')} disabled={answerDisabled} data-testid="answer-idk" title="I don’t know · ungraded"><span>IDK</span><kbd>↓</kbd></button><button className="answer-button correct" onClick={() => void submit('correct')} disabled={answerDisabled} data-testid="answer-correct"><Check size={20} /><span>Correct</span><kbd>→</kbd></button></div>
             <p className="keyboard-hint" aria-live="polite">{pending === 'answer' ? 'Saving answer…' : 'Swipe, use arrow keys, or tap a button.'}</p>
-          </> : running && state.job ? <section className="panel planning-state" data-testid="planning-state"><div className="planning-icon"><Sparkles size={28} /></div><div className="eyebrow">{PROVIDER_NAMES[state.settings.provider]} is planning</div><h1 ref={heading} tabIndex={-1}>Preparing your lesson</h1><div className="job-stage" role="status"><LoaderCircle size={20} className="spin" /><div><strong>{state.job.stage}</strong><p>{state.job.message || 'Working on your next lesson…'}</p></div></div><p className="fine-print">Elapsed: {Math.max(0, Math.floor((now - Date.parse(state.job.startedAt)) / 1000))}s</p><button className="button quiet" onClick={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} disabled={Boolean(pending)} data-testid="cancel-plan"><X size={17} />{pending === 'cancel' ? 'Cancelling…' : 'Cancel planning'}</button></section>
+          </> : running && !discussing && state.job ? <section className="panel planning-state" data-testid="planning-state"><div className="planning-icon"><Sparkles size={28} /></div><div className="eyebrow">{PROVIDER_NAMES[state.settings.provider]} is planning</div><h1 ref={heading} tabIndex={-1}>Preparing your lesson</h1><div className="job-stage" role="status"><LoaderCircle size={20} className="spin" /><div><strong>{state.job.stage}</strong><p>{state.job.message || 'Working on your next lesson…'}</p></div></div><p className="fine-print">Elapsed: {Math.max(0, Math.floor((now - Date.parse(state.job.startedAt)) / 1000))}s</p><button className="button quiet" onClick={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} disabled={Boolean(pending)} data-testid="cancel-plan"><X size={17} />{pending === 'cancel' ? 'Cancelling…' : 'Cancel planning'}</button></section>
             : <>
-              {state.job?.status === 'error' && <div className="notice error" role="alert"><strong>Lesson preparation stopped</strong><p>{state.job.message}</p><p className="fine-print">Check Setup, then retry.</p></div>}
-              {state.job?.status === 'cancelled' && <div className="notice">Planning cancelled. You can try again.</div>}
-              {lesson?.complete ? <><div className="lesson-progress"><div><span className="eyebrow">Lesson {state.lessons.length}</span><span className="muted">Complete</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.total} data-testid="lesson-progress"><span style={{ width: '100%' }} /></div></div><LessonComplete key={lesson.id} lesson={lesson} reviews={state.reviews.filter((item) => item.attempt.lessonId === lesson.id)} pending={pending} canPlan={!connectionError && Boolean(chosenProvider?.available)} onSave={(draft) => void mutate('feedback', () => saveFeedback(lesson.id, draft))} onNext={(draft) => void startLesson(false, draft)} onNotebook={() => { setSelectedLessonId(lesson.id); changeView('notebook'); }} /></>
+              {state.job?.status === 'error' && <div className="notice error" role="alert"><strong>{state.job.kind === 'discussion' ? 'Tutor response stopped' : 'Lesson preparation stopped'}</strong><p>{state.job.message}</p><p className="fine-print">{state.job.kind === 'discussion' ? 'Your feedback is saved. Retry or continue to the next lesson.' : 'Check Setup, then retry.'}</p></div>}
+              {state.job?.status === 'cancelled' && <div className="notice">{state.job.kind === 'discussion' ? 'Follow-up cancelled. Your feedback is saved.' : 'Planning cancelled. You can try again.'}</div>}
+              {lesson?.complete ? <><div className="lesson-progress"><div><span className="eyebrow">Lesson {state.lessons.length}</span><span className="muted">Complete</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.total} data-testid="lesson-progress"><span style={{ width: '100%' }} /></div></div><LessonComplete key={lesson.id} lesson={lesson} reviews={state.reviews.filter((item) => item.attempt.lessonId === lesson.id)} discussion={state.discussions.filter(item => item.lessonId === lesson.id).at(-1)} job={state.job} pending={pending} canPlan={!connectionError && Boolean(chosenProvider?.available)} reflective={state.settings.tutorMode === 'reflective'} onSave={(draft) => void mutate('feedback', () => saveCompletion(draft))} onDiscuss={(draft) => void discussFeedback(draft)} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onNext={(draft) => void startLesson(false, draft)} onNotebook={() => { setSelectedLessonId(lesson.id); changeView('notebook'); }} /></>
                 : <section className="welcome-panel"><Code2 size={38} /><h1 ref={heading} tabIndex={-1}>Read code. Make a call.</h1><p className="welcome-copy">Swipe left for buggy. Right for correct. IDK when you’re unsure.</p><div className="welcome-actions"><button className="button primary" onClick={() => void startLesson(false)} disabled={Boolean(pending) || Boolean(connectionError) || !chosenProvider?.available} data-testid="start-lesson">{pending === 'start' ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{state.job?.status === 'error' ? 'Retry lesson' : 'Start lesson'}<ArrowRight size={18} /></button>{state.settings.provider !== 'demo' && <button className="button quiet" onClick={() => void startLesson(true)} disabled={Boolean(pending) || Boolean(connectionError)} data-testid="try-demo"><FlaskConical size={17} /> Try demo</button>}</div><div className="current-setup"><span>{PROVIDER_NAMES[state.settings.provider]} · {state.settings.batchSize} cards</span><button className="text-button" onClick={() => changeView('settings')}>Setup<ChevronRight size={14} /></button></div>{!chosenProvider?.available && <p className="fine-print">Set up your local agent, or try the demo.</p>}</section>}
             </>}
           {lastReview && !running && <div className="previous-answer" data-testid="previous-answer"><span className={lastReview.attempt.correct === null ? 'neutral' : lastReview.attempt.correct ? 'positive' : 'negative'} role="status">{lastReview.attempt.correct === null ? <HelpCircle size={15} /> : lastReview.attempt.correct ? <Check size={15} /> : <X size={15} />}{resultLabel(lastReview.attempt.correct)}</span><button className="button compact quiet" onClick={() => setReviewId(lastReview.attempt.id)} disabled={Boolean(pending)} data-testid="review-previous">Review previous<ChevronRight size={15} /></button></div>}

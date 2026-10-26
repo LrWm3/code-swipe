@@ -266,8 +266,22 @@ td { color: #b1bac4; }
 .accidental-answers small { display: block; font-size: .65rem; color: var(--muted); margin-top: 5px; }
 .feedback-save { display: flex; justify-content: space-between; align-items: center; gap: 15px; margin-top: 18px; }
 .completion-actions { display: flex; gap: 11px; margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--line); }
+.feedback-help { margin: 10px 0 14px; }
+.tutor-feedback-actions { display: flex; align-items: center; gap: 14px; margin-top: 20px; }
+.tutor-feedback-actions .button { flex-shrink: 0; }
+.discussion-progress { display: flex; align-items: center; gap: 12px; }
+.discussion-progress > div { flex: 1; }
+.tutor-discussion { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--line); }
+.tutor-discussion > p { margin-top: 12px; color: #b1bac4; }
+.tutor-discussion > h3 { margin-top: 24px; }
+.follow-up-question { margin: 20px 0; }
+.follow-up-question label { display: block; font-size: .83rem; line-height: 1.6; margin-bottom: 10px; }
+.follow-up-question textarea { min-height: 84px; }
+.conversation-reply { margin-top: 18px; }
+.conversation-reply p { margin-top: 7px; color: #b1bac4; }
 @media (max-width: 880px) { .local-status { display: none; } .settings-grid { grid-template-columns: minmax(0, 1fr); } .settings-aside { display: grid; grid-template-columns: 1fr 1fr; } .notebook-grid { grid-template-columns: minmax(0, 1fr); } .lesson-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 290px; overflow: auto; padding-right: 5px; } }
 @media (max-width: 600px) {
+  .tutor-feedback-actions { flex-direction: column; align-items: stretch; }.discussion-progress { flex-wrap: wrap; }
   .app-shell { padding: 0 16px; }.app-header { min-height: 70px; gap: 12px; }.brand { font-size: 1.12rem; gap: 7px; }.brand-mark { width: 31px; height: 31px; }.brand-mark svg { width: 21px; }
   nav { border: 0; background: transparent; padding: 0; gap: 2px; }nav button { padding: 8px 8px; gap: 4px; font-size: .59rem; flex-direction: column; min-width: 47px; }nav button svg { width: 17px; height: 17px; }
   main { padding: 22px 0 32px; }.lesson-progress { margin-bottom: 17px; }.panel { padding: 20px; }.exercise-intro { padding: 16px 16px 14px; }.exercise-intro h1 { font-size: .89rem; }.specification { padding: 10px 11px; }.specification p { font-size: .73rem; }
