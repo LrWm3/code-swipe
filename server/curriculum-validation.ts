@@ -114,9 +114,10 @@ function priorState(context: TutorContext): PriorState {
 
 // Preserve strings and operators while removing formatting and comments. This
 // catches cosmetically changed references without equating different literals.
-function codeTokens(source: string): string[] {
+function codeTokens(source: string, entryName: string): string[] {
   return (source.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*|[$\w]+|===|!==|=>|==|!=|<=|>=|\+\+|--|&&|\|\||\?\?|\*\*|[^\s]/g) ?? [])
-    .filter(token => !token.startsWith('//') && !token.startsWith('/*'));
+    .filter(token => !token.startsWith('//') && !token.startsWith('/*'))
+    .map((token, index, tokens) => token === entryName && tokens[index - 1] === 'function' ? '$entry' : token);
 }
 
 function overlap(left: string[], right: string[]): number {
@@ -133,8 +134,8 @@ function overlap(left: string[], right: string[]): number {
 function mirrors(left: ProposedQuestion, right: ProposedQuestion): boolean {
   const specification = (value: string) => value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
   if (specification(left.specification) === specification(right.specification)) return true;
-  const leftTokens = codeTokens(left.referenceCode);
-  const rightTokens = codeTokens(right.referenceCode);
+  const leftTokens = codeTokens(left.referenceCode, left.signature?.name ?? 'solve');
+  const rightTokens = codeTokens(right.referenceCode, right.signature?.name ?? 'solve');
   if (leftTokens.join('\0') === rightTokens.join('\0')) return true;
   // Near-duplicate detection is deliberately limited to substantial code with
   // matching targets and nearly identical wording. Tiny functions are too generic.

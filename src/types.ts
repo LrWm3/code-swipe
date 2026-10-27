@@ -116,7 +116,11 @@ export interface Hypothesis {
   nextProbe: string;
 }
 export interface TestCase { input: JsonValue; expected: JsonValue; note: string }
+export interface FunctionSignature { name: string; parameters: string[] }
 export interface ProposedQuestion {
+  // New questions use positional argument tuples in tests[].input.
+  // Sealed legacy questions omit this and still call solve(input).
+  signature?: FunctionSignature;
   title: string;
   specification: string;
   code: string;
@@ -220,6 +224,25 @@ export interface StoreData {
   feedback?: LessonFeedback[];
   discussions?: Discussion[];
   skillRetrofits?: SkillRetrofit[];
+  presentationRevisions?: PresentationRevision[];
+}
+export interface PresentationRevision {
+  id: string;
+  createdAt: string;
+  archiveHash: string;
+  method: string;
+  questions: {
+    lessonId: string;
+    exerciseId: string;
+    predictionHash: string;
+    signature: FunctionSignature;
+    // null passes the entire legacy input; a string selects an object field.
+    parameterSources: (string | null)[];
+    specification: string;
+    code: string;
+    referenceCode: string;
+    note: string;
+  }[];
 }
 export interface ProviderStatus { id: ProviderId; available: boolean; version: string; detail: string }
 export interface TutorContext {
@@ -265,6 +288,7 @@ export interface Review {
   question: Exercise;
   lessonObjective: string;
   provider: ProviderId;
+  originalPresentation?: Pick<Exercise, 'specification' | 'code' | 'referenceCode'>;
 }
 export interface LessonSummary {
   id: string;

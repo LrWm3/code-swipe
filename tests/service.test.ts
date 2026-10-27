@@ -200,7 +200,7 @@ test('given one declared mirror pair teaching a new concept, when its implementa
     proposal.questions[2] = {
       ...structuredClone(first),
       title: 'Quantities with an extra initial item',
-      code: 'function solve(input) { return input.reduce((total, order) => total + order.quantity, 1); }',
+      code: first.code.replace('order.quantity, 0)', 'order.quantity, 1)'),
       verdict: 'buggy',
       explanation: 'Starting at one adds an item not present in the input.',
     };

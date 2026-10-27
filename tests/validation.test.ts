@@ -14,7 +14,22 @@ function context(batchSize = DEFAULT_LESSON_SIZE): TutorContext {
   };
 }
 
-function lesson(): ProposedLesson { return createDemoLesson(context()); }
+// Exercise the legacy execution path too: old sealed lessons cannot be rewritten.
+function lesson(): ProposedLesson {
+  const proposal = createDemoLesson(context());
+  for (const question of proposal.questions) {
+    const { name, parameters } = question.signature!;
+    const args = parameters.length === 1 ? 'input' : parameters.map(key => `input.${key}`).join(', ');
+    question.code += `\nfunction solve(input) { return ${name}(${args}); }`;
+    question.referenceCode += `\nfunction solve(input) { return ${name}(${args}); }`;
+    for (const test of question.tests) {
+      const values = test.input as import('../src/types.ts').JsonValue[];
+      test.input = parameters.length === 1 ? values[0] : Object.fromEntries(parameters.map((key, i) => [key, values[i]]));
+    }
+    delete question.signature;
+  }
+  return proposal;
+}
 
 test('given curated sample lessons, when validating every batch size, then correct code passes and buggy code has exact counterexamples', async () => {
   for (const count of [6, 8, 12]) {
@@ -24,14 +39,14 @@ test('given curated sample lessons, when validating every batch size, then corre
     assert.equal(validated.questions.length, count);
     assert.equal(validated.reports.length, count);
     assert.deepEqual(validated.reports[0].failures, [
-      { input: [-1, 0, 2], expected: [0, 2], actual: [2], error: null },
-      { input: [3, 0, 3], expected: [3, 0, 3], actual: [3, 3], error: null },
+      { input: [[-1, 0, 2]], expected: [0, 2], actual: [2], error: null },
+      { input: [[3, 0, 3]], expected: [3, 0, 3], actual: [3, 3], error: null },
     ]);
     assert.equal(validated.reports[0].testCount, 4);
     assert.equal(validated.reports[0].passedCount, 2);
     assert.deepEqual(validated.reports[2].failures, [
-      { input: [-8, -3, -5], expected: -3, actual: 0, error: null },
-      { input: [-2], expected: -2, actual: 0, error: null },
+      { input: [[-8, -3, -5]], expected: -3, actual: 0, error: null },
+      { input: [[-2]], expected: -2, actual: 0, error: null },
     ]);
     for (let i = 0; i < count; i++) {
       const report = validated.reports[i];

@@ -384,6 +384,24 @@ test('given distinct simple functions or opposite specification operators, when 
   assert.doesNotThrow(() => validateCurriculum(proposal, context()));
 });
 
+test('given the same reference under distinct descriptive function names, when checking mirrors, then renaming does not evade the pair limit', () => {
+  const proposal = lesson();
+  for (const [index, name] of [[1, 'countReadings'], [2, 'totalReadings']] as const) {
+    proposal.questions[index].signature = { name, parameters: ['readings'] };
+    proposal.questions[index].referenceCode = `function ${name}(readings) { return readings.length; }`;
+  }
+  assert.throws(() => validateCurriculum(proposal, context()), /undeclared mirror/);
+});
+
+test('given different object properties matching their function names, when comparing references, then property names retain their meaning', () => {
+  const proposal = lesson();
+  for (const [index, name] of [[1, 'quantity'], [2, 'price']] as const) {
+    proposal.questions[index].signature = { name, parameters: ['order'] };
+    proposal.questions[index].referenceCode = `function ${name}(order) { return order.${name}; }`;
+  }
+  assert.doesNotThrow(() => validateCurriculum(proposal, context()));
+});
+
 test('given substantial references with tiny edits and near-identical specifications, when assigning separate families, then conservative mirror detection rejects them', () => {
   const proposal = lesson();
   const code = 'function solve(input) { const values = input.values; let total = 0; let count = 0; for (let index = 0; index < values.length; index++) { const value = values[index]; if (value >= 0 && value < 100) { total += value; count += 1; } } return { total: total, count: count, accepted: count > 0 }; }';

@@ -9,6 +9,7 @@
     "start": "NODE_ENV=production node dist/server.js",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "retrofit:presentation": "tsx scripts/retrofit-presentation.ts",
     "retrofit:skills": "tsx scripts/retrofit-skills.ts",
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts"
   },

@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, Code2, Download, Flag, FlaskConical, HelpCircle, LoaderCircle, Settings2, ShieldCheck, Sparkles, Terminal, X } from 'lucide-react';
 import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
-import type { Answer, AppState, CurriculumPlan, Discussion, Hypothesis, Job, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
+import type { Answer, AppState, CurriculumPlan, Discussion, Hypothesis, Job, JsonValue, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
 import { flushReviewSessions, useAnswerClock, useReviewSync, useReviewTiming } from './ui';
 import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from './lesson-sizes';
 
@@ -98,7 +98,7 @@ function ReviewPanel({ review, pending, onFlag }: { review: Review; pending: boo
   const renderCheck = ({ test, index, failure }: typeof checks[number]) => (
     <div className={`test-case ${failure ? 'failed' : ''}`} key={index}>
       <div className="test-heading"><span>{failure ? <X size={15} /> : <Check size={15} />} Check {index + 1}{failure ? ' · counterexample' : ' · passed'}</span>{test.note && <small>{test.note}</small>}</div>
-      <dl><div><dt>Input</dt><dd><code>{json(test.input)}</code></dd></div><div><dt>Expected</dt><dd><code>{json(test.expected)}</code></dd></div><div><dt>Actual</dt><dd><code>{failure ? (failure.error || json(failure.actual)) : json(test.expected)}</code></dd></div></dl>
+      <dl><div><dt>{question.signature ? 'Call' : 'Input'}</dt><dd><code>{question.signature ? `${question.signature.name}(${(test.input as JsonValue[]).map(value => JSON.stringify(value)).join(', ')})` : json(test.input)}</code></dd></div><div><dt>Expected</dt><dd><code>{json(test.expected)}</code></dd></div><div><dt>Actual</dt><dd><code>{failure ? (failure.error || json(failure.actual)) : json(test.expected)}</code></dd></div></dl>
     </div>
   );
   return <div className="review-content" data-testid="answer-review">
@@ -115,6 +115,13 @@ function ReviewPanel({ review, pending, onFlag }: { review: Review; pending: boo
         <div className="test-list">{passing.map(renderCheck)}</div>
       </details>}
     </div>
+    {review.originalPresentation && <div className="review-section">
+      <p className="fine-print">Names, documentation, and wording updated. Your answer was graded against the original version.</p>
+      <details className="plain-details code-details"><summary>Original wording and code</summary>
+        <p>{review.originalPresentation.specification}</p><Code code={review.originalPresentation.code} />
+        <details className="plain-details"><summary>Original reference implementation</summary><Code code={review.originalPresentation.referenceCode} /></details>
+      </details>
+    </div>}
     <details className="plain-details code-details"><summary>Revisit this code and specification</summary><p>{question.specification}</p><Code code={question.code} /></details>
     <details className="plain-details code-details"><summary>Reference implementation</summary><Code code={question.referenceCode} /></details>
     <div className="prediction-box">

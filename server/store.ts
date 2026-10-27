@@ -7,7 +7,8 @@ import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from '../src/lesson-sizes.ts';
 import { PURPOSES } from '../src/types.ts';
 import { buildCurriculumMemory } from './curriculum-memory.ts';
 import { validateRetrofit } from './skill-evidence.ts';
-import type { SkillRetrofit } from '../src/types.ts';
+import { presentationArchiveHash, revisedQuestion, validatePresentationRevision, verifyPresentationBehavior } from './presentation-revisions.ts';
+import type { PresentationRevision, SkillRetrofit } from '../src/types.ts';
 
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -83,6 +84,14 @@ export class LocalStore {
           validateRetrofit(retrofit, { ...this.data, skillRetrofits: prior }, false);
           prior.push(retrofit);
         }
+        const revisions = this.data.presentationRevisions ?? [];
+        if (!Array.isArray(revisions)) throw new Error('Invalid presentation revisions.');
+        const priorRevisions: PresentationRevision[] = [];
+        for (const revision of revisions) {
+          if (priorRevisions.some(item => item.id === revision.id)) throw new Error('Duplicate presentation revision.');
+          validatePresentationRevision(revision, { ...this.data, presentationRevisions: priorRevisions }, false);
+          priorRevisions.push(revision);
+        }
         if (!Array.isArray(this.data.feedback) || !Array.isArray(this.data.reviewSessions) || !Array.isArray(this.data.discussions)) throw new Error('Invalid feedback history.');
         for (const lesson of this.data.lessons) {
           if (lesson.predictionHash !== lessonHash(lesson)) throw new Error('A committed lesson has changed.');
@@ -109,6 +118,19 @@ export class LocalStore {
     validateRetrofit(retrofit, this.data);
     this.update({ ...this.data, skillRetrofits: [...this.data.skillRetrofits ?? [], structuredClone(retrofit)] });
     return true;
+  }
+
+  async importPresentationRevision(revision: PresentationRevision): Promise<{ imported: boolean; fixtures: number }> {
+    const existing = this.data.presentationRevisions?.find(item => item.id === revision.id);
+    if (existing) {
+      if (JSON.stringify(existing) !== JSON.stringify(revision)) throw new AppError('A saved presentation revision cannot be overwritten.');
+      return { imported: false, fixtures: 0 };
+    }
+    const before = this.snapshot();
+    const fixtures = await verifyPresentationBehavior(revision, before);
+    if (presentationArchiveHash(this.data) !== presentationArchiveHash(before)) throw new AppError('Archive changed during verification; retry against the latest data.');
+    this.update({ ...this.data, presentationRevisions: [...this.data.presentationRevisions ?? [], structuredClone(revision)] });
+    return { imported: true, fixtures };
   }
 
   private persist() {
@@ -284,8 +306,12 @@ export class LocalStore {
     const question = lesson.questions.find(item => item.id === attempt.exerciseId)!;
     const complete = this.data.attempts.filter(item => item.lessonId === lesson.id).length === lesson.questions.length;
     // Planning metadata may identify a future mirror and reveal its verdict.
-    const { plan: _plan, ...answeredQuestion } = question;
-    return structuredClone({ attempt, question: complete ? question : answeredQuestion, lessonObjective: lesson.objective, provider: lesson.provider });
+    const revision = this.data.presentationRevisions?.flatMap(item => item.questions).find(item => item.exerciseId === question.id);
+    const displayed = revision ? revisedQuestion(question, revision) : question;
+    const { plan: _plan, ...answeredQuestion } = displayed;
+    return structuredClone({ attempt, question: complete ? displayed : answeredQuestion, lessonObjective: lesson.objective, provider: lesson.provider,
+      ...(revision ? { originalPresentation: { specification: question.specification, code: question.code, referenceCode: question.referenceCode } } : {}),
+    });
   }
 
   context(): TutorContext {

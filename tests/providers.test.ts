@@ -23,11 +23,12 @@ function wireLesson() {
       sequenceRationale: 'This provider fixture contains one approachable warmup.',
     },
     questions: [{
+      signature: { name: 'sumMeasurements', parameters: ['measurements'] },
       title: 'Sum the measurements', specification: 'Return the sum of an array of finite integers.',
-      code: 'function solve(input) { return input.reduce((a,b) => a+b, 0); }',
-      referenceCode: 'function solve(input) { return input.reduce((a,b) => a+b, 0); }',
+      code: '/**\n * @param {number[]} measurements - Finite integer measurements. Do not modify.\n * @returns {number} Total measurement, or 0 for an empty array.\n */\nfunction sumMeasurements(measurements) { return measurements.reduce((total, measurement) => total + measurement, 0); }',
+      referenceCode: '/**\n * @param {number[]} measurements - Finite integer measurements. Do not modify.\n * @returns {number} Total measurement, or 0 for an empty array.\n */\nfunction sumMeasurements(measurements) { return measurements.reduce((total, measurement) => total + measurement, 0); }',
       verdict: 'correct', explanation: 'Initial zero handles an empty array.',
-      tests: [[], [0], [1, 2], [-3, 2]].map(input => ({ inputJson: JSON.stringify(input), expectedJson: JSON.stringify(input.reduce((a, b) => a + b, 0)), note: 'Distinct boundary fixture.' })),
+      tests: [[], [0], [1, 2], [-3, 2]].map(input => ({ inputJson: JSON.stringify([input]), expectedJson: JSON.stringify(input.reduce((a, b) => a + b, 0)), note: 'Distinct boundary fixture.' })),
       purpose: 'practice', hypothesisId: null, ifCorrect: 'Tentative evidence only.', ifIncorrect: 'Compare empty inputs.', prediction: { pCorrect: 0.6, rationale: 'Uncertain prior.' },
       plan: {
         purposes: ['practice', 'diagnostic'], educationalObjective: 'Practice accumulation over arrays.',
@@ -187,7 +188,7 @@ test('given a valid Codex response, when generating, then sends stdin and valida
   input.settings.model = 'model-name;not-a-shell-command';
   const stages: string[] = [];
   const result = await generateLesson(input, { signal: new AbortController().signal, onProgress: stage => stages.push(stage) });
-  assert.deepEqual(result.questions[0].tests[2].input, [1, 2]);
+  assert.deepEqual(result.questions[0].tests[2].input, [[1, 2]]);
   assert.equal(result.questions[0].tests[2].expected, 3);
   assert.equal(result.questions[0].hypothesisId, null);
   assert.deepEqual(result.questions[0].plan, wireLesson().questions[0].plan);

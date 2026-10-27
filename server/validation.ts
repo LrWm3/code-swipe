@@ -1,10 +1,11 @@
 import { getQuickJS } from 'quickjs-emscripten';
-import type { JsonValue, ProposedLesson, TutorContext, ValidationReport } from '../src/types.ts';
+import type { FunctionSignature, JsonValue, ProposedLesson, TutorContext, ValidationReport } from '../src/types.ts';
 import { LESSON_SIZES } from '../src/lesson-sizes.ts';
 import { PURPOSES } from '../src/types.ts';
 import { curriculumSchema, questionPlanSchema, validateSchema } from './prompts.ts';
 import { validateCurriculum } from './curriculum-validation.ts';
 import { questionSkills } from './skill-evidence.ts';
+import { validateArguments, validateQuestionFormat, validateSignature } from './question-format.ts';
 
 const MAX_PAYLOAD = 180_000;
 const MAX_VALUE = 16_000;
@@ -138,11 +139,15 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
   const unique = { title: new Set<string>(), code: new Set<string>() };
   for (let i = 0; i < questions.length; i++) {
     const path = `questions[${i}]`;
-    const question = object(questions[i], path, ['title', 'specification', 'code', 'referenceCode', 'verdict', 'explanation', 'tests', 'purpose', 'hypothesisId', 'ifCorrect', 'ifIncorrect', 'prediction', 'plan']);
+    const question = object(questions[i], path, ['title', 'specification', 'code', 'referenceCode', 'verdict', 'explanation', 'tests', 'purpose', 'hypothesisId', 'ifCorrect', 'ifIncorrect', 'prediction', 'plan', ...((questions[i] as Record<string, unknown>)?.signature !== undefined ? ['signature'] : [])]);
     string(question.title, `${path}.title`, 140);
     string(question.specification, `${path}.specification`, 2_000);
     string(question.code, `${path}.code`, 6_000);
     string(question.referenceCode, `${path}.referenceCode`, 6_000);
+    if (question.signature !== undefined) {
+      try { validateQuestionFormat(question as unknown as { signature: FunctionSignature; code: string; referenceCode: string }); }
+      catch (error) { reject(path, (error as Error).message); }
+    }
     string(question.explanation, `${path}.explanation`, 2_000);
     string(question.ifCorrect, `${path}.ifCorrect`, 1_000);
     string(question.ifIncorrect, `${path}.ifIncorrect`, 1_000);
@@ -190,6 +195,10 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
       const test = object(tests[j], testPath, ['input', 'expected', 'note']);
       string(test.note, `${testPath}.note`, 500);
       checkJSON(test.input, `${testPath}.input`, MAX_VALUE);
+      if (question.signature) {
+        try { validateArguments(test.input as JsonValue, question.signature as FunctionSignature); }
+        catch (error) { reject(testPath, (error as Error).message); }
+      }
       checkJSON(test.expected, `${testPath}.expected`, MAX_VALUE);
       const signature = canonical(test.input);
       if (inputs.has(signature)) reject(`${testPath}.input`, 'duplicates an existing fixture; provide at least four distinct inputs.');
@@ -209,6 +218,7 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
 // The function cannot read harness locals or the expected fixture output.
 const HARNESS = `(() => {
   'use strict';
+  const apply = Reflect.apply;
   const arrayIsArray = Array.isArray;
   const objectKeys = Object.keys;
   const ownKeys = Reflect.ownKeys;
@@ -274,13 +284,13 @@ const HARNESS = `(() => {
     envelope.error = error;
     return stringify(envelope);
   }
-  return function(solve, serializedInput) {
+  return function(callable, serializedInput) {
     const input = parse(serializedInput);
     freezeInput(input);
     let result;
-    try { result = solve(input); }
+    try { result = apply(callable, undefined, input); }
     catch (error) {
-      if (nonPureAccess) return pack('invalid', null, 'solve(input) must be deterministic; Date and randomness are unavailable.');
+      if (nonPureAccess) return pack('invalid', null, 'The function must be deterministic; Date and randomness are unavailable.');
       let message = 'Exercise threw an error.';
       if (typeof error === 'string') message = error;
       else if (error !== null && typeof error === 'object') {
@@ -290,7 +300,7 @@ const HARNESS = `(() => {
       if (message.length > 1000) message = 'Exercise threw an error (message too long).';
       return pack('throw', null, message);
     }
-    if (nonPureAccess) return pack('invalid', null, 'solve(input) must be deterministic; Date and randomness are unavailable.');
+    if (nonPureAccess) return pack('invalid', null, 'The function must be deterministic; Date and randomness are unavailable.');
     try {
       count = 0;
       const normalized = normalize(result, 0);
@@ -305,7 +315,9 @@ const HARNESS = `(() => {
 
 interface Execution { actual: JsonValue | null; error: string | null }
 
-async function execute(code: string, input: JsonValue, path: string, signal?: AbortSignal): Promise<Execution> {
+export async function execute(code: string, input: JsonValue, path: string, signal?: AbortSignal, signature?: FunctionSignature): Promise<Execution> {
+  if (signature) { validateSignature(signature); validateArguments(input, signature); }
+  const functionName = signature?.name ?? 'solve';
   if (signal?.aborted) reject(path, 'validation cancelled.');
   // Yield between fixture runs so cancellation and other local requests progress.
   await new Promise<void>(resolve => setImmediate(resolve));
@@ -332,15 +344,15 @@ async function execute(code: string, input: JsonValue, path: string, signal?: Ab
     }
     const harness = harnessResult.value;
     try {
-      const source = vm.evalCode(`(function () { "use strict";\n${code}\n; return typeof solve === "function" ? solve : null; })()`, 'exercise.js', { type: 'global' });
+      const source = vm.evalCode(`(function () { "use strict";\n${code}\n; return typeof ${functionName} === "function" ? ${functionName} : null; })()`, 'exercise.js', { type: 'global' });
       if (!('value' in source)) {
         source.error.dispose();
-        reject(path, interrupted ? 'sandbox execution timed out or was cancelled; provide a terminating pure solve(input).' : 'source did not compile or initialize; define a synchronous pure solve(input) within sandbox limits.');
+        reject(path, interrupted ? 'sandbox execution timed out or was cancelled; provide a terminating pure function.' : 'source did not compile or initialize; define the declared synchronous pure function within sandbox limits.');
       }
       const solve = source.value;
       try {
-        if (vm.typeof(solve) !== 'function') reject(path, 'must define a synchronous function named solve(input).');
-        const argument = vm.newString(JSON.stringify(input));
+        if (vm.typeof(solve) !== 'function') reject(path, `must define a synchronous function named ${functionName}.`);
+        const argument = vm.newString(JSON.stringify(signature ? input : [input]));
         try {
           const result = vm.callFunction(harness, vm.undefined, solve, argument);
           if (!('value' in result)) {
@@ -378,9 +390,9 @@ export async function validateLesson(proposal: unknown, context: TutorContext, s
     const report: ValidationReport = { checkedAt: new Date().toISOString(), testCount: question.tests.length, passedCount: 0, failures: [] };
     for (let j = 0; j < question.tests.length; j++) {
       const fixture = question.tests[j];
-      const reference = await execute(question.referenceCode, fixture.input, `questions[${i}].referenceCode (fixture ${j + 1})`, signal);
+      const reference = await execute(question.referenceCode, fixture.input, `questions[${i}].referenceCode (fixture ${j + 1})`, signal, question.signature);
       if (reference.error !== null || canonical(reference.actual) !== canonical(fixture.expected)) reject(`questions[${i}].tests[${j}]`, 'referenceCode does not produce the expected output; repair the reference or fixture before labelling the candidate.');
-      const observed = await execute(question.code, fixture.input, `questions[${i}].code (fixture ${j + 1})`, signal);
+      const observed = await execute(question.code, fixture.input, `questions[${i}].code (fixture ${j + 1})`, signal, question.signature);
       if (observed.error === null && canonical(observed.actual) === canonical(fixture.expected)) report.passedCount++;
       else report.failures.push({ input: fixture.input, expected: fixture.expected, actual: observed.actual, error: observed.error });
     }
