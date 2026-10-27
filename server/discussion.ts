@@ -45,6 +45,7 @@ export function buildDiscussionPrompt(context: DiscussionContext): string {
   const evidence = {
     interests: context.tutor.settings.interests,
     curriculumMemory: context.tutor.curriculum ?? { concepts: [], variants: [], legacyLessons: [] },
+    retrospectiveSkillReviews: context.tutor.skillRetrofits ?? [],
     lesson: context.lesson,
     attempts: context.attempts.filter(attempt => !attempt.flagged),
     feedback: context.feedback,
@@ -66,6 +67,7 @@ Reflect briefly on this completed lesson and what the learner has chosen to shar
 Ask 0–3 short, neutral, useful follow-up questions only when clarification would help. Return questions: [] when no follow-up is needed. Avoid repeating already answered or skipped questions. Questions should invite optional clarification, not demand justification for a grade or persuade the learner to agree. Do not imply an obligation to explain. Skipped, unanswered, or declined questions carry no negative inference about ability, effort, or understanding.
 Never rewrite graded answers, code verdicts, or committed predictions. A learner correction can change a tentative interpretation, not historical correctness or a precommitted probability. Attempts flagged true are excluded evidence and have been omitted from attempt lists. Do not infer misconceptions from reported accidental input. An answer of "idk" with correct: null records uncertainty, not an incorrect judgment. Do not assume explanations were reviewed or understood.
 Prior discussion reflections are tentative tutor interpretations, not independent evidence. Use actual learner answers as self reports, preserving uncertainty and respecting skips. Historical context is a bounded recent sample; omitted history does not imply no prior learning.
+Skill evidence separates target, exercised, and incidental roles, independent versus scaffolded work, and supporting/challenging/inconclusive signals. Whole-card accuracy is not per-skill accuracy. IDK and a composite failure do not establish failure of every prerequisite; a buggy judgment may identify only one defect. Retrospective skill reviews were added after answers and are tentative interpretations, not original teaching intent or independent proof. Use the learner's feedback to reconsider attribution without changing their recorded answers.
 
 VALIDATION LIMITS
 Return only reflection and questions. Reflection must contain 1–3000 characters after trimming whitespace. Questions must contain 0–3 unique strings, each 1–600 characters after trimming whitespace. Use concise, nonempty text; no whitespace-only strings.

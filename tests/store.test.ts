@@ -528,6 +528,7 @@ test('given delayed evidence retained only in concept memory, when retention is 
   unrelated.name = 'An unrelated concept';
   proposal.curriculum!.conceptUpdates.push(unrelated);
   proposal.questions[0].plan!.conceptIds = [unrelated.id];
+  proposal.questions[0].plan!.skillUses = [{ ...proposal.questions[0].plan!.skillUses![0], conceptId: unrelated.id }];
   await assert.rejects(validateLesson(proposal, context), /retention requires a related unflagged attempt/);
 });
 

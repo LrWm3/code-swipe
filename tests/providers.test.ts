@@ -32,7 +32,7 @@ function wireLesson() {
       plan: {
         purposes: ['practice', 'diagnostic'], educationalObjective: 'Practice accumulation over arrays.',
         investigativeObjective: 'Check whether an initial value explains the empty-array result.',
-        conceptIds: ['array-sum'], prerequisiteIds: [], stage: 'warmup', cognitiveDemand: 1,
+        conceptIds: ['array-sum'], prerequisiteIds: [], skillUses: [{ conceptId: 'array-sum', role: 'target', support: 'independent', ifCorrect: 'supports', ifIncorrect: 'inconclusive', rationale: 'Matching the sum requires reasoning about the accumulator.' }], stage: 'warmup', cognitiveDemand: 1,
         difficultyRationale: 'Trace one accumulation operation and its initial value.',
         scaffolding: 'The contract explicitly states the input values and requested sum.',
         ifIdk: 'Record uncertainty; it could concern reduce syntax or accumulation.',

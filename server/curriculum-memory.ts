@@ -1,10 +1,12 @@
-import type { Attempt, ConceptRecord, ConceptUpdate, CurriculumMemory, Exercise, Lesson, StoreData, VariantRecord } from '../src/types.ts';
+import type { Attempt, ConceptRecord, ConceptUpdate, CurriculumMemory, Exercise, Lesson, StoreData, VariantRecord, SkillEvidence } from '../src/types.ts';
+import { questionSkills, interpretSkill, independentSupport, familiaritySupport } from './skill-evidence.ts';
 
 interface LinkedAttempt {
   attempt: Attempt;
   lesson: Lesson;
   question: Exercise;
   conceptIds: Set<string>;
+  skills: Map<string, SkillEvidence>;
 }
 
 function blankConcept(id: string): ConceptRecord {
@@ -14,6 +16,8 @@ function blankConcept(id: string): ConceptRecord {
     uncertainty: 'No learner familiarity has been established.', nextProbe: '',
     exposures: 0, correctJudgments: 0, incorrectJudgments: 0, uncertainJudgments: 0,
     lastSeenAt: null, evidence: [],
+    practice: { targeted: 0, exercised: 0, incidental: 0, supporting: 0, challenging: 0, inconclusive: 0,
+      lastTargetedAt: null, lastExercisedAt: null, lastIndependentSuccessAt: null },
   };
 }
 
@@ -21,14 +25,15 @@ function latestTime(previous: string | null, next: string): string {
   return previous === null || Date.parse(next) > Date.parse(previous) ? next : previous;
 }
 
-function summarizeEvidence(evidence: LinkedAttempt[], cited: Set<string>, familiar: boolean): ConceptRecord['evidence'] {
+function summarizeEvidence(evidence: LinkedAttempt[], cited: Set<string>, familiar: boolean, conceptId: string): ConceptRecord['evidence'] {
   const recent = [...evidence].sort((a, b) => Date.parse(b.attempt.answeredAt) - Date.parse(a.attempt.answeredAt));
   // Recent mistakes and IDK responses must remain visible even when an older
   // assessment cites many successes. Reserve half the summary for recency.
   const selected = new Map(recent.slice(0, 3).map(item => [item.attempt.id, item]));
-  const correctCitations = recent.filter(item => cited.has(item.attempt.id) && item.attempt.correct === true);
+  const qualifies = (item: LinkedAttempt) => cited.has(item.attempt.id) && familiaritySupport(item.skills.get(conceptId) ?? {});
+  const correctCitations = recent.filter(qualifies);
   if (familiar) {
-    const supporting = () => [...selected.values()].filter(item => cited.has(item.attempt.id) && item.attempt.correct === true);
+    const supporting = () => [...selected.values()].filter(qualifies);
     if (!supporting().length && correctCitations.length) selected.set(correctCitations[0].attempt.id, correctCitations[0]);
     const supportedLessons = new Set(supporting().map(item => item.lesson.id));
     if (supportedLessons.size < 2) {
@@ -40,14 +45,26 @@ function summarizeEvidence(evidence: LinkedAttempt[], cited: Set<string>, famili
       selected.set(item.attempt.id, item);
     }
   }
+  if (!familiar) {
+    // Incidental recent encounters must not bury the last useful skill evidence.
+    for (const predicate of [
+      (item: LinkedAttempt) => independentSupport(item.skills.get(conceptId) ?? {}),
+      (item: LinkedAttempt) => item.skills.get(conceptId)?.signal === 'challenges',
+      (item: LinkedAttempt) => item.skills.get(conceptId)?.role === 'target',
+    ]) {
+      const item = recent.find(predicate);
+      if (item && selected.size < 6) selected.set(item.attempt.id, item);
+    }
+  }
   for (const item of [...recent.filter(item => cited.has(item.attempt.id)), ...recent]) {
     if (selected.size >= 6) break;
     selected.set(item.attempt.id, item);
   }
   return [...selected.values()].sort((a, b) => Date.parse(b.attempt.answeredAt) - Date.parse(a.attempt.answeredAt))
-    .map(({ attempt, lesson, question }) => ({
+    .map(({ attempt, lesson, question, skills }) => ({
       attemptId: attempt.id, lessonId: lesson.id, title: question.title,
       answer: attempt.answer, correct: attempt.correct, answeredAt: attempt.answeredAt,
+      ...skills.get(conceptId),
     }));
 }
 
@@ -58,6 +75,7 @@ export function buildCurriculumMemory(data: StoreData): CurriculumMemory {
   const lessons = new Map(data.lessons.map(lesson => [lesson.id, lesson]));
   const linked = new Map<string, LinkedAttempt>();
   const answeredQuestions = new Set<string>();
+  const retrofits = new Map((data.skillRetrofits ?? []).flatMap(item => item.questions.map(entry => [entry.exerciseId, entry] as const)));
   for (const attempt of data.attempts) {
     const lesson = lessons.get(attempt.lessonId);
     const question = lesson?.questions.find(item => item.id === attempt.exerciseId);
@@ -70,7 +88,10 @@ export function buildCurriculumMemory(data: StoreData): CurriculumMemory {
     const key = JSON.stringify([lesson.id, question.id]);
     if (answeredQuestions.has(key)) continue;
     answeredQuestions.add(key);
-    linked.set(attempt.id, { attempt, lesson, question, conceptIds: new Set(question.plan?.conceptIds ?? []) });
+    const retrofit = retrofits.get(question.id);
+    const skills = new Map(questionSkills(question, retrofit?.predictionHash === lesson.predictionHash ? retrofit : undefined)
+      .map(({ use, source }) => [use.conceptId, interpretSkill(use, source, attempt)]));
+    linked.set(attempt.id, { attempt, lesson, question, conceptIds: new Set(skills.keys()), skills });
   }
 
   const concepts = new Map<string, ConceptRecord>();
@@ -81,6 +102,13 @@ export function buildCurriculumMemory(data: StoreData): CurriculumMemory {
     if (!concepts.has(id)) concepts.set(id, blankConcept(id));
     return concepts.get(id)!;
   };
+
+  for (const retrofit of data.skillRetrofits ?? []) for (const definition of retrofit.concepts) {
+    Object.assign(ensureConcept(definition.id), structuredClone(definition), {
+      uncertainty: 'Retrospectively identified from archived questions; evidence remains tentative.',
+      nextProbe: 'Use meaningful embedded practice or a focused probe when this skill is uncertain.',
+    });
+  }
 
   for (const lesson of data.lessons) {
     for (const update of lesson.curriculum?.conceptUpdates ?? []) {
@@ -96,7 +124,10 @@ export function buildCurriculumMemory(data: StoreData): CurriculumMemory {
         const item = linked.get(attemptId);
         // Legacy plans have no concept IDs. Later, explicit evidence references
         // can associate their real answers without rewriting those sealed plans.
-        if (item && !item.question.plan) item.conceptIds.add(update.id);
+        if (item && !item.question.plan && !item.skills.has(update.id)) {
+          item.conceptIds.add(update.id);
+          item.skills.set(update.id, { role: 'target', support: 'scaffolded', source: 'legacy', signal: 'inconclusive', rationale: 'Retrospective concept citation without reviewed skill attribution.' });
+        }
       }
     }
     for (const question of lesson.questions) {
@@ -131,6 +162,17 @@ export function buildCurriculumMemory(data: StoreData): CurriculumMemory {
       record.exposures += 1;
       record.lastSeenAt = latestTime(record.lastSeenAt, attempt.answeredAt);
       if (attempt.flagged) continue;
+      const skill = item.skills.get(id)!;
+      const practice = record.practice!;
+      if (skill.role === 'target') practice.targeted++;
+      else if (skill.role === 'exercised') practice.exercised++;
+      else practice.incidental++;
+      if (skill.signal === 'supports') practice.supporting++;
+      else if (skill.signal === 'challenges') practice.challenging++;
+      else practice.inconclusive++;
+      if (skill.role === 'target') practice.lastTargetedAt = latestTime(practice.lastTargetedAt, attempt.answeredAt);
+      if (skill.role !== 'incidental' && skill.source !== 'legacy') practice.lastExercisedAt = latestTime(practice.lastExercisedAt, attempt.answeredAt);
+      if (independentSupport(skill)) practice.lastIndependentSuccessAt = latestTime(practice.lastIndependentSuccessAt, attempt.answeredAt);
       if (attempt.answer === 'idk') record.uncertainJudgments += 1;
       else if (attempt.correct) record.correctJudgments += 1;
       else record.incorrectJudgments += 1;
@@ -148,16 +190,17 @@ export function buildCurriculumMemory(data: StoreData): CurriculumMemory {
     });
     const cited = new Set(record.evidenceAttemptIds);
     const evidence = evidenceByConcept.get(record.id) ?? [];
-    const correctCitations = evidence.filter(item => cited.has(item.attempt.id) && item.attempt.correct === true);
+    const correctCitations = evidence.filter(item => cited.has(item.attempt.id) && familiaritySupport(item.skills.get(record.id) ?? {}));
     const supportsFamiliarity = correctCitations.length >= 3 && new Set(correctCitations.map(item => item.lesson.id)).size >= 2;
 
     // Exposure establishes introduction, never competence. In particular, IDK
     // and excluded answers cannot sustain a previous claim of familiarity.
     if (!record.exposures) record.familiarity = 'unknown';
-    else if (record.familiarity === 'familiar' && !supportsFamiliarity) record.familiarity = correctCitations.length ? 'developing' : 'introduced';
-    else if (record.familiarity === 'developing' && !record.correctJudgments) record.familiarity = 'introduced';
+    else if (record.familiarity === 'familiar' && !supportsFamiliarity) record.familiarity = record.practice!.supporting ? 'developing' : 'introduced';
+    else if (record.familiarity === 'developing' && !record.practice!.supporting) record.familiarity = 'introduced';
+    if (record.familiarity === 'unknown' && record.exposures) record.familiarity = 'introduced';
 
-    record.evidence = summarizeEvidence(evidence, cited, record.familiarity === 'familiar');
+    record.evidence = summarizeEvidence(evidence, cited, record.familiarity === 'familiar', record.id);
   }
 
   return {

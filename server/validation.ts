@@ -4,6 +4,7 @@ import { LESSON_SIZES } from '../src/lesson-sizes.ts';
 import { PURPOSES } from '../src/types.ts';
 import { curriculumSchema, questionPlanSchema, validateSchema } from './prompts.ts';
 import { validateCurriculum } from './curriculum-validation.ts';
+import { questionSkills } from './skill-evidence.ts';
 
 const MAX_PAYLOAD = 180_000;
 const MAX_VALUE = 16_000;
@@ -156,18 +157,20 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
     try { validateSchema(question.plan, questionPlanSchema, `${path}.plan`); }
     catch (error) { reject(path, (error as Error).message); }
     if ((question.plan as ProposedLesson['questions'][number]['plan'])!.purposes.includes('retention')) {
-      const targetConcepts = (question.plan as NonNullable<ProposedLesson['questions'][number]['plan']>).conceptIds;
+      const targetConcepts = (question.plan as NonNullable<ProposedLesson['questions'][number]['plan']>).skillUses!
+        .filter(use => use.role !== 'incidental').map(use => use.conceptId);
       const candidates = new Map<string, string>();
       for (const concept of context.curriculum?.concepts ?? []) {
-        if (targetConcepts.includes(concept.id)) for (const evidence of concept.evidence) candidates.set(evidence.attemptId, evidence.answeredAt);
+        if (targetConcepts.includes(concept.id)) for (const evidence of concept.evidence) {
+          if (evidence.role && evidence.role !== 'incidental' && evidence.source !== 'legacy') candidates.set(evidence.attemptId, evidence.answeredAt);
+        }
       }
       for (const { lesson: previous, attempts } of context.history) for (const attempt of attempts) {
         candidates.delete(attempt.id); // Raw evidence overrides summaries, including exclusions.
         const previousQuestion = previous.questions.find(item => item.id === attempt.exerciseId);
         if (!attemptIds.has(attempt.id) || !previousQuestion) continue;
-        const linked = previousQuestion.plan?.conceptIds.some(id => targetConcepts.includes(id))
-          || (!previousQuestion.plan && Array.isArray((lesson.curriculum as ProposedLesson['curriculum'])?.conceptUpdates)
-            && (lesson.curriculum as NonNullable<ProposedLesson['curriculum']>).conceptUpdates.some(concept => targetConcepts.includes(concept.id) && concept.evidenceAttemptIds.includes(attempt.id)));
+        const retrofit = context.skillRetrofits?.flatMap(item => item.questions).find(item => item.exerciseId === previousQuestion.id);
+        const linked = questionSkills(previousQuestion, retrofit).some(({ use, source }) => source !== 'legacy' && use.role !== 'incidental' && targetConcepts.includes(use.conceptId));
         if (linked) candidates.set(attempt.id, attempt.answeredAt);
       }
       if (context.settings.tutorMode === 'baseline' || ![...candidates].some(([id, at]) => Date.now() - Date.parse(at) >= 86_400_000 && (lesson.rationale as string).includes(id))) {

@@ -36,6 +36,7 @@ The demo uses curated examples and neutral predictions. It is not adaptive. For 
 - Plans 6, 8, or 12 questions at a time (8 by default), with explicit assumptions, alternative explanations, and predictions.
 - Gives each question educational and investigative objectives, with multiple purposes such as practice, transfer, retention, frontier exploration, or checking a teaching strategy. Lessons record their mix, progression, cognitive demand, and scaffolding; planning checks reject missing or inconsistent annotations.
 - Builds durable concept evidence from the lesson archive, including familiarity, uncertainty, prerequisites, representations, and deferred variants. Each lesson includes at most one closely related pair for a new concept; other counterparts stay deferred or unasked with a reason.
+- Distinguishes skills directly targeted, exercised inside a harder task, and merely present. Meaningful embedded practice can keep older skills in use without repeating their original questions. Each card commits what success or failure could indicate for each skill; scaffolded practice, ambiguous answers, and incidental appearances do not establish independent competence.
 - Runs each reference solution and candidate against generated fixtures inside QuickJS, with time and memory limits. Failed batches get one repair attempt before being rejected.
 - Saves immutable plan artifacts before showing a question. Answers append to local history; retries do not duplicate them.
 - Records review openings and estimated active viewing time, so the tutor can account for explanations you chose to inspect. Background or unfocused time is paused.
@@ -47,6 +48,8 @@ After a lesson, question reviews include optional intent details. Completed less
 
 Existing lessons remain readable without curriculum annotations. Newly generated lessons include them; a current batch stays fixed, and answers or feedback influence the next lesson.
 
+Skill memory keeps the last targeted encounter, last meaningful exercise, and last independent supporting answer separately. Raw right/wrong counts still describe whole-card judgments, not successes or failures on every component. The tutor uses the evidence and its uncertainty to choose embedded practice or focused checks; there is no automatic forgetting timer. Skill roles and interpretations are model judgments, not proof of the learner's reasoning. An old prerequisite is not credited merely because it appears in a dependency chain.
+
 Exercises are currently **pure, synchronous JavaScript functions** using JSON inputs and outputs. New lessons use short task descriptions and compact JSDoc type hints, favoring simple inputs over unnecessary object wrappers. These hints describe the contract; they do not add TypeScript runtime support. Additional languages remain future work. Tests are finite checks, not proofs: a generated specification, reference solution, or fixture can still be wrong. The flag button exists for that reason.
 
 ## Local data and model calls
@@ -56,6 +59,10 @@ History lives in `.code-swipe/`, which Git ignores. The server listens on loopba
 The tutor receives recent answered lessons, your lesson notes, optional conversations, review timings, evidence supporting current hypotheses, and concept evidence reconstructed from the archive so older concepts survive the recent-history window. Baseline mode receives none of that history. CLI tools, workspace instructions, and plugins are disabled for these planning calls; this app supplies the complete context. OpenCode's global configuration is isolated, so choose a model explicitly if its default is unsuitable. Existing CLI authentication remains in use.
 
 **Export record** downloads plans and raw answers, including answers for any unfinished lesson. Keep it private if you want to preserve the exercise. Back up the entire data directory to restore it; export is for inspection, not an import format. Run only one server against a given data directory.
+
+Older questions can receive a separate retrospective skill review, stored in `skillRetrofits` and included in exports. Reviews preserve the original lesson files, predictions, grades, feedback, and timestamps. They can guide future teaching, but cannot alone establish the `familiar` label. Flagging an answer also excludes its retrospective evidence.
+
+To import a reviewed annotation file, stop the server first, then run `npm run retrofit:skills -- --data-dir .code-swipe --review PATH` for a dry run. Add `--apply` to back up the state and plans, validate the archive fingerprint, and append the review. Restart the server afterward. Running without `--review` prints the fingerprint and concept IDs for preparing a review. The format is `SkillRetrofit` in `src/types.ts`: review actual specifications, implementations, answers, and feedback; assign roles conservatively and document ambiguity. The command does not invent historical teaching intentions or automatically infer skills from code syntax. Reimporting an identical review does nothing; stale or conflicting reviews are rejected.
 
 Optional settings are listed in [.env.example](.env.example). Copy it to `.env` to change the port, data directory, executable paths, or per-call planning timeout. Cancel/retry is available if a provider stalls. Starting the server again keeps completed work and allows a fresh attempt after an interrupted run.
 

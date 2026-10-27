@@ -3,6 +3,29 @@ export type Verdict = 'buggy' | 'correct';
 export type Answer = Verdict | 'idk';
 export const PURPOSES = ['diagnostic', 'practice', 'transfer', 'retention', 'introduction', 'frontier', 'robustness', 'calibration', 'strategy-evaluation'] as const;
 export type Purpose = typeof PURPOSES[number];
+export interface SkillUse {
+  conceptId: string;
+  role: 'target' | 'exercised' | 'incidental';
+  support: 'independent' | 'scaffolded';
+  ifCorrect: 'supports' | 'inconclusive';
+  ifIncorrect: 'challenges' | 'inconclusive';
+  rationale: string;
+}
+export interface SkillRetrofit {
+  id: string;
+  createdAt: string;
+  method: string;
+  archiveHash: string;
+  concepts: Pick<ConceptUpdate, 'id' | 'name' | 'description' | 'representations' | 'prerequisiteIds'>[];
+  questions: { lessonId: string; exerciseId: string; predictionHash: string; uses: SkillUse[]; note: string }[];
+}
+export interface SkillEvidence {
+  role: SkillUse['role'];
+  support: SkillUse['support'];
+  source: 'planned' | 'retrospective' | 'legacy';
+  signal: 'supports' | 'challenges' | 'inconclusive';
+  rationale: string;
+}
 export interface ConceptUpdate {
   id: string;
   name: string;
@@ -21,6 +44,8 @@ export interface QuestionPlan {
   conceptIds: string[];
   prerequisiteIds: string[];
   stage: 'warmup' | 'build' | 'stretch' | 'consolidate';
+  // Absent only in sealed questions from before skill attribution.
+  skillUses?: SkillUse[];
   cognitiveDemand: number;
   difficultyRationale: string;
   scaffolding: string;
@@ -49,7 +74,12 @@ export interface ConceptRecord extends ConceptUpdate {
   incorrectJudgments: number;
   uncertainJudgments: number;
   lastSeenAt: string | null;
-  evidence: { attemptId: string; lessonId: string; title: string; answer: Answer; correct: boolean | null; answeredAt: string }[];
+  practice?: {
+    targeted: number; exercised: number; incidental: number;
+    supporting: number; challenging: number; inconclusive: number;
+    lastTargetedAt: string | null; lastExercisedAt: string | null; lastIndependentSuccessAt: string | null;
+  };
+  evidence: ({ attemptId: string; lessonId: string; title: string; answer: Answer; correct: boolean | null; answeredAt: string } & Partial<SkillEvidence>)[];
 }
 export interface VariantRecord {
   familyId: string;
@@ -189,6 +219,7 @@ export interface StoreData {
   reviewSessions?: ReviewSession[];
   feedback?: LessonFeedback[];
   discussions?: Discussion[];
+  skillRetrofits?: SkillRetrofit[];
 }
 export interface ProviderStatus { id: ProviderId; available: boolean; version: string; detail: string }
 export interface TutorContext {
@@ -200,6 +231,7 @@ export interface TutorContext {
   feedback?: LessonFeedback[];
   discussions?: Discussion[];
   curriculum?: CurriculumMemory;
+  skillRetrofits?: SkillRetrofit[];
   repair?: string[];
   draft?: ProposedLesson;
 }

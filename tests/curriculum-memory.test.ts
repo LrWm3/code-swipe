@@ -26,7 +26,7 @@ function question(id: string, plan: Partial<QuestionPlan> = {}): Exercise {
     validation: { checkedAt: timestamp(0), testCount: 1, passedCount: 1, failures: [] },
     plan: {
       purposes: ['practice'], educationalObjective: 'Recognize bounds.', investigativeObjective: 'Check boundary understanding.',
-      conceptIds: ['bounds'], prerequisiteIds: [], stage: 'build', cognitiveDemand: 2,
+      conceptIds: ['bounds'], prerequisiteIds: [], skillUses: (plan.conceptIds ?? ['bounds']).map(conceptId => ({ conceptId, role: 'target', support: 'independent', ifCorrect: 'supports', ifIncorrect: 'inconclusive', rationale: 'A focused judgment gives tentative evidence about this skill.' })), stage: 'build', cognitiveDemand: 2,
       difficultyRationale: 'One boundary to track.', scaffolding: 'Use a short trace.', ifIdk: 'Trace one iteration.',
       familyId: 'boundary-family', counterpart: 'defer', variantReason: 'Vary the boundary in a later lesson.', ...plan,
     },
@@ -59,6 +59,7 @@ function archive(lessons: Lesson[], attempts = lessons.flatMap(item => item.ques
 test('given more than twelve archived lessons, when rebuilding after restart, then early concepts counts citations and variant families survive recent-history truncation', t => {
   const lessons = Array.from({ length: 18 }, (_, index) => lesson(index));
   lessons[0].questions[0].plan!.conceptIds.push('early-only');
+  lessons[0].questions[0].plan!.skillUses!.push({ ...lessons[0].questions[0].plan!.skillUses![0], conceptId: 'early-only' });
   lessons[0].curriculum!.conceptUpdates.push(update({ id: 'early-only', name: 'Early concept' }));
   const cited = ['attempt-q0', 'attempt-q1', 'attempt-q2'];
   lessons[17].curriculum!.conceptUpdates = [update({
@@ -253,7 +254,7 @@ test('given an established reflective assessment, when returning from baseline l
   assert.equal(added.description, 'First recorded definition.');
   assert.equal(added.exposures, 1);
   assert.equal(added.correctJudgments, 1);
-  assert.equal(added.familiarity, 'unknown');
+  assert.equal(added.familiarity, 'introduced');
 
   data.lessons.push(lesson(4, [question('resumed')], [update({ familiarity: 'developing', uncertainty: 'Revise after baseline error.' })]));
   assert.equal(buildCurriculumMemory(data).concepts[0].uncertainty, 'Revise after baseline error.');

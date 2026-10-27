@@ -142,6 +142,8 @@ export function createDemoLesson(context: TutorContext): ProposedLesson {
       educationalObjective: 'Practice checking a small function against its contract and boundary cases.',
       investigativeObjective: 'Observe this judgment without claiming a particular reasoning strategy or capability.',
       conceptIds: ['demo-code-review'], prerequisiteIds: [],
+      skillUses: [{ conceptId: 'demo-code-review', role: 'target', support: 'independent', ifCorrect: 'supports', ifIncorrect: 'inconclusive',
+        rationale: 'The judgment concerns matching a function to its contract; errors do not isolate a particular component skill.' }],
       stage: index === 0 ? 'warmup' : index === count - 1 ? 'consolidate' : index >= Math.ceil(count / 2) ? 'stretch' : 'build',
       cognitiveDemand: index === 0 ? 1 : index === count - 1 ? 2 : index >= Math.ceil(count / 2) ? 3 : 2,
       difficultyRationale: 'A sample sequence moves from one comparison to combining operations, then finishes with a compact independent task. These are illustrative demands, not personalized estimates.',

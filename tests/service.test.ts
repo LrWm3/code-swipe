@@ -195,6 +195,7 @@ test('given one declared mirror pair teaching a new concept, when its implementa
     proposal.curriculum!.conceptUpdates.push({ ...structuredClone(proposal.curriculum!.conceptUpdates[0]), id: 'reduce-seed', name: 'Reduction initial values' });
     const first = proposal.questions[1];
     first.plan = { ...first.plan!, familyId: 'quantity-total', conceptIds: ['reduce-seed'], purposes: ['introduction', 'practice'], counterpart: 'in-lesson', variantReason: 'Teach the role of an explicit reduce initial value through one controlled contrast.' };
+    first.plan.skillUses = [{ ...first.plan.skillUses![0], conceptId: 'reduce-seed' }];
     first.purpose = 'introduction';
     proposal.questions[2] = {
       ...structuredClone(first),

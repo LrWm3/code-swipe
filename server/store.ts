@@ -6,6 +6,8 @@ import { parseDiscussionOutput } from './discussion.ts';
 import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from '../src/lesson-sizes.ts';
 import { PURPOSES } from '../src/types.ts';
 import { buildCurriculumMemory } from './curriculum-memory.ts';
+import { validateRetrofit } from './skill-evidence.ts';
+import type { SkillRetrofit } from '../src/types.ts';
 
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -73,6 +75,14 @@ export class LocalStore {
         this.data.feedback ??= [];
         this.data.reviewSessions ??= [];
         this.data.discussions ??= [];
+        const retrofits = this.data.skillRetrofits ?? [];
+        if (!Array.isArray(retrofits)) throw new Error('Invalid skill retrofit history.');
+        const prior: SkillRetrofit[] = [];
+        for (const retrofit of retrofits) {
+          if (prior.some(item => item.id === retrofit.id)) throw new Error('Duplicate skill retrofit.');
+          validateRetrofit(retrofit, { ...this.data, skillRetrofits: prior }, false);
+          prior.push(retrofit);
+        }
         if (!Array.isArray(this.data.feedback) || !Array.isArray(this.data.reviewSessions) || !Array.isArray(this.data.discussions)) throw new Error('Invalid feedback history.');
         for (const lesson of this.data.lessons) {
           if (lesson.predictionHash !== lessonHash(lesson)) throw new Error('A committed lesson has changed.');
@@ -89,6 +99,17 @@ export class LocalStore {
   }
 
   snapshot(): StoreData { return structuredClone(this.data); }
+
+  importSkillRetrofit(retrofit: SkillRetrofit): boolean {
+    const existing = this.data.skillRetrofits?.find(item => item.id === retrofit.id);
+    if (existing) {
+      if (JSON.stringify(existing) !== JSON.stringify(retrofit)) throw new AppError('A saved retrofit cannot be overwritten.');
+      return false;
+    }
+    validateRetrofit(retrofit, this.data);
+    this.update({ ...this.data, skillRetrofits: [...this.data.skillRetrofits ?? [], structuredClone(retrofit)] });
+    return true;
+  }
 
   private persist() {
     const temp = `${this.file}.${randomUUID()}.tmp`;
@@ -284,6 +305,10 @@ export class LocalStore {
     while (discussions.length > 1 && Buffer.byteLength(JSON.stringify(discussions)) > 48_000) discussions.shift();
     return { settings: { ...this.data.settings }, history: structuredClone(selected),
       curriculum: buildCurriculumMemory(this.data),
+      // Older review details remain in durable concept evidence, just as old plans do.
+      skillRetrofits: structuredClone((this.data.skillRetrofits ?? []).map(review => ({ ...review,
+        questions: review.questions.filter(question => knownLessons.has(question.lessonId)),
+      })).filter(review => review.questions.length)),
       discussions: structuredClone(discussions),
       feedback: structuredClone((this.data.feedback ?? []).filter(item => knownLessons.has(item.lessonId))),
       reviewSessions: structuredClone((this.data.reviewSessions ?? []).filter(item => knownIds.has(item.attemptId))),

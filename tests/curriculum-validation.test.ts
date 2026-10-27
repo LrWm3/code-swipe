@@ -38,6 +38,7 @@ function lesson(count = 8): ProposedLesson {
         purposes: [index === 0 ? 'diagnostic' : index === count - 1 ? 'transfer' : 'practice'],
         educationalObjective: 'Practice checking the requested increment.', investigativeObjective: 'Investigate whether the learner distinguishes adjacent results.',
         conceptIds: ['boundary-checks'], prerequisiteIds: [],
+        skillUses: [{ conceptId: 'boundary-checks', role: 'target', support: 'independent', ifCorrect: 'supports', ifIncorrect: 'inconclusive', rationale: 'The focused boundary judgment provides tentative supporting evidence.' }],
         stage: index === 0 ? 'warmup' : index === count - 1 ? 'consolidate' : index >= count / 2 ? 'stretch' : 'build',
         cognitiveDemand: index === 0 ? 1 : index === count - 1 ? 2 : index >= count / 2 ? 3 : 2,
         difficultyRationale: 'The later card combines more reasoning steps; the final card transfers without adding new demands.',
@@ -59,7 +60,7 @@ function memory(tutor: TutorContext, evidence: ConceptRecord['evidence'], id = '
 }
 
 function evidence(attemptId = 'attempt-1', lessonId = 'previous-1', correct: boolean | null = true): ConceptRecord['evidence'][number] {
-  return { attemptId, lessonId, title: 'Prior boundary exercise', answer: correct === null ? 'idk' : 'correct', correct, answeredAt: '2026-01-01T10:00:00.000Z' };
+  return { attemptId, lessonId, title: 'Prior boundary exercise', answer: correct === null ? 'idk' : 'correct', correct, role: 'target', support: 'independent', source: 'planned', signal: correct === true ? 'supports' : 'inconclusive', rationale: 'Focused prior boundary judgment.', answeredAt: '2026-01-01T10:00:00.000Z' };
 }
 
 function observe(proposal: ProposedLesson, attemptIds = ['attempt-1'], conceptIds = ['boundary-checks']): void {
@@ -261,6 +262,7 @@ test('given an unseen transitive prerequisite, when stretching, then hidden asse
   const proposal = lesson();
   proposal.curriculum!.conceptUpdates.push(concept('integer-order', 'Integer order'));
   proposal.questions[4].plan!.prerequisiteIds = ['integer-order'];
+  proposal.questions[4].plan!.skillUses!.push({ ...proposal.questions[4].plan!.skillUses![0], conceptId: 'integer-order', role: 'exercised' });
   assert.throws(() => validateCurriculum(proposal, context()), /stretch prerequisite "integer-order"/);
   proposal.questions[4].plan!.scaffolding = 'Integer order is explained using an explicit number-line example on the card.';
   assert.throws(() => validateCurriculum(proposal, context()), /stretch prerequisite "integer-order"/);
@@ -268,6 +270,7 @@ test('given an unseen transitive prerequisite, when stretching, then hidden asse
   assert.doesNotThrow(() => validateCurriculum(proposal, context()));
   proposal.questions[4].plan!.scaffolding = 'None needed.';
   proposal.questions[1].plan!.conceptIds = ['integer-order'];
+  proposal.questions[1].plan!.skillUses = [{ ...proposal.questions[1].plan!.skillUses![0], conceptId: 'integer-order' }];
   assert.doesNotThrow(() => validateCurriculum(proposal, context()));
 });
 
@@ -275,6 +278,7 @@ test('given prior correct prerequisite evidence, when stretching without earlier
   const tutor = context(); const prior = memory(tutor, [evidence()], 'integer-order'); prior.name = 'Integer order';
   const proposal = lesson(); observe(proposal, ['attempt-1'], ['integer-order']);
   proposal.questions[4].plan!.prerequisiteIds = ['integer-order'];
+  proposal.questions[4].plan!.skillUses!.push({ ...proposal.questions[4].plan!.skillUses![0], conceptId: 'integer-order', role: 'exercised' });
   assert.doesNotThrow(() => validateCurriculum(proposal, tutor));
   prior.evidence[0].correct = false;
   assert.throws(() => validateCurriculum(proposal, tutor), /stretch prerequisite/);
@@ -286,7 +290,9 @@ test('given a target with an unlisted dependency chain, when stretching, then co
   proposal.curriculum!.conceptUpdates[1].prerequisiteIds = ['intermediate'];
   proposal.curriculum!.conceptUpdates[2].prerequisiteIds = ['unseen'];
   proposal.questions[4].plan!.conceptIds = ['new-target'];
+  proposal.questions[4].plan!.skillUses = [{ ...proposal.questions[4].plan!.skillUses![0], conceptId: 'new-target' }];
   proposal.questions[1].plan!.conceptIds = ['intermediate'];
+  proposal.questions[1].plan!.skillUses = [{ ...proposal.questions[1].plan!.skillUses![0], conceptId: 'intermediate' }];
   assert.throws(() => validateCurriculum(proposal, context()), /stretch prerequisite "unseen"/);
 });
 
@@ -315,7 +321,7 @@ test('given malformed introductory pairs, when checking family declarations, the
     { edit: p => { p.questions[2].plan!.variantReason = 'Useful.'; }, expected: /explain how this counterpart teaches/ },
     { edit: p => { p.questions[3].plan!.familyId = p.questions[1].plan!.familyId; }, expected: /at most two cards/ },
     { edit: p => { p.questions[1].plan!.familyId = 'other-family'; }, expected: /exactly two cards/ },
-    { edit: p => { p.curriculum!.conceptUpdates.push(concept('other', 'Other concept')); p.questions[2].plan!.conceptIds = ['other']; }, expected: /identical conceptIds/ },
+    { edit: p => { p.curriculum!.conceptUpdates.push(concept('other', 'Other concept')); p.questions[2].plan!.conceptIds = ['other']; p.questions[2].plan!.skillUses![0].conceptId = 'other'; }, expected: /identical conceptIds/ },
   ];
   for (const { edit, expected } of cases) { const proposal = lesson(); pair(proposal); edit(proposal); assert.throws(() => validateCurriculum(proposal, context()), expected); }
 });
