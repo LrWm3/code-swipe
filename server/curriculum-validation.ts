@@ -131,7 +131,7 @@ function overlap(left: string[], right: string[]): number {
   return 2 * shared / (left.length + right.length || 1);
 }
 
-function mirrors(left: ProposedQuestion, right: ProposedQuestion): boolean {
+export function mirrors(left: ProposedQuestion, right: ProposedQuestion): boolean {
   const specification = (value: string) => value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
   if (specification(left.specification) === specification(right.specification)) return true;
   const leftTokens = codeTokens(left.referenceCode, left.signature?.name ?? 'solve');
@@ -139,7 +139,7 @@ function mirrors(left: ProposedQuestion, right: ProposedQuestion): boolean {
   if (leftTokens.join('\0') === rightTokens.join('\0')) return true;
   // Near-duplicate detection is deliberately limited to substantial code with
   // matching targets and nearly identical wording. Tiny functions are too generic.
-  if (Math.min(leftTokens.length, rightTokens.length) < 48 || !sameSet(left.plan!.conceptIds, right.plan!.conceptIds)) return false;
+  if (!left.plan || !right.plan || Math.min(leftTokens.length, rightTokens.length) < 48 || !sameSet(left.plan.conceptIds, right.plan.conceptIds)) return false;
   if (overlap(normalized(left.specification).split(' '), normalized(right.specification).split(' ')) < 0.85) return false;
   const bigrams = (tokens: string[]) => tokens.slice(1).map((token, index) => `${tokens[index]}\0${token}`);
   return overlap(bigrams(leftTokens), bigrams(rightTokens)) >= 0.96;

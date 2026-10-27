@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, Code2, Download, Flag, FlaskConical, HelpCircle, LoaderCircle, Settings2, ShieldCheck, Sparkles, Terminal, X } from 'lucide-react';
 import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
-import type { Answer, AppState, CurriculumPlan, Discussion, Hypothesis, Job, JsonValue, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
+import type { Answer, AppState, CurriculumPlan, Discussion, GuideConcept, ConceptGuide, GuideEvent, Hypothesis, Job, JsonValue, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
 import { flushReviewSessions, useAnswerClock, useReviewSync, useReviewTiming } from './ui';
 import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from './lesson-sizes';
 
@@ -86,7 +86,7 @@ function Accountability({ metrics, settings }: { metrics: Metrics; settings: Set
   </section>;
 }
 
-function ReviewPanel({ review, pending, onFlag }: { review: Review; pending: boolean; onFlag: (review: Review) => void }) {
+function ReviewPanel({ review, pending, onFlag, onGuide }: { review: Review; pending: boolean; onFlag: (review: Review) => void; onGuide: (concept: GuideConcept) => void }) {
   const { question, attempt } = review;
   const checks = question.tests.map((test, index) => ({
     test,
@@ -108,6 +108,7 @@ function ReviewPanel({ review, pending, onFlag }: { review: Review; pending: boo
       <Badge>{(attempt.elapsedMs / 1000).toFixed(1)}s</Badge>
     </div>
     <div className="review-section"><h3>Why {question.verdict}?</h3><p>{question.explanation}</p></div>
+    {Boolean(review.relatedConcepts?.length) && <div className="review-section"><h3>Related concepts</h3><div className="concept-links">{review.relatedConcepts!.map(concept => <button className="button compact quiet" key={concept.id} onClick={() => onGuide(concept)} data-testid="review-concept">{concept.name}<ChevronRight size={14} /></button>)}</div></div>}
     <div className="review-section"><h3>Test evidence</h3><p className="fine-print">{question.validation.passedCount} of {question.validation.testCount} checks passed for this implementation. Tests support this verdict; they do not prove correctness for every possible input.</p>
       {failures.length > 0 && <div className="test-list">{failures.map(renderCheck)}</div>}
       {passing.length > 0 && <details className="plain-details passing-checks" data-testid="passing-checks">
@@ -129,6 +130,7 @@ function ReviewPanel({ review, pending, onFlag }: { review: Review; pending: boo
       <h3>{percent(question.prediction.pCorrect)} predicted chance you would answer correctly</h3>
       <p>{question.prediction.rationale}</p>
       <p className="fine-print">pCorrect = {question.prediction.pCorrect.toFixed(2)} · {question.purpose} probe{question.hypothesisId ? ` · ${question.hypothesisId}` : ''}</p>
+      {Boolean(review.teachingBeforeAnswer?.length) && <p className="fine-print">After this prediction and before your answer: {review.teachingBeforeAnswer!.join(' · ')}.</p>}
       <details className="plain-details"><summary>Tutor’s prewritten interpretation</summary><p>{attempt.correct === null ? "You chose IDK. This answer is ungraded; neither prewritten verdict interpretation applies." : attempt.correct ? question.ifCorrect : question.ifIncorrect}</p></details>
       {question.plan && <details className="plain-details"><summary>Question intent</summary>
         <p><span className="small-label">Educational objective</span>{question.plan.educationalObjective}</p>
@@ -224,9 +226,9 @@ function Notebook({ state, selectedId, onSelect, onReview, onPractice }: { state
   };
   return <div className="notebook-view"><div className="page-intro"><div><div className="eyebrow">Your local record</div><h1>Tutor notebook</h1><p className="muted">Lessons, answers, feedback, and the tutor’s reasoning.</p></div><a className="button quiet" href="/api/export" download><Download size={17} /> Export record</a></div>
     <details className="notebook-metrics"><summary>Tutor prediction metrics</summary><Accountability metrics={state.metrics} settings={state.settings} /></details>
-    {ordered.length === 0 ? <div className="panel empty-state"><BookOpen size={36} /><h2>A fresh notebook.</h2><p>Your first lesson will appear here.</p></div> : <div className="notebook-grid"><div className="lesson-list" aria-label="Lessons">{ordered.map((lesson, index) => <button key={lesson.id} onClick={() => onSelect(lesson.id)} className={`lesson-list-item ${selected?.id === lesson.id ? 'selected' : ''}`} aria-pressed={selected?.id === lesson.id}><span className="small-label">Lesson {ordered.length - index} · {PROVIDER_NAMES[lesson.provider]}</span><strong>{lesson.objective}</strong><span>{date(lesson.createdAt)}</span><span className="lesson-list-status">{lesson.answered}/{lesson.total} answers <Badge tone={lesson.complete ? 'green' : ''}>{lesson.complete ? 'Complete' : 'In progress'}</Badge></span></button>)}</div>
+    {ordered.length === 0 ? <div className="panel empty-state"><BookOpen size={36} /><h2>A fresh notebook.</h2><p>Your first lesson will appear here.</p></div> : <div className="notebook-grid"><div className="lesson-list" aria-label="Lessons">{ordered.map((lesson, index) => <button key={lesson.id} onClick={() => onSelect(lesson.id)} className={`lesson-list-item ${selected?.id === lesson.id ? 'selected' : ''}`} aria-pressed={selected?.id === lesson.id}><span className="small-label">Lesson {ordered.length - index} · {PROVIDER_NAMES[lesson.provider]}</span><strong>{lesson.objective}</strong><span>{date(lesson.createdAt)}</span><span className="lesson-list-status">{lesson.answered}/{lesson.total} answers <Badge tone={lesson.complete ? 'green' : ''}>{lesson.complete ? 'Complete' : lesson.endedEarly ? 'Left early' : 'In progress'}</Badge></span></button>)}</div>
       {selected && <section key={selected.id} id="lesson-overview" tabIndex={-1} className="panel notebook-detail"><div className="eyebrow">{PROVIDER_NAMES[selected.provider]} · {selected.tutorMode}</div><h2>{selected.objective}</h2><p>{selected.rationale}</p>
-        {selected.complete ? <><div id="lesson-reflection" tabIndex={-1} className="notebook-section"><h3>Reflection before this lesson</h3><p className="preserve-lines">{selected.reflection || 'No prior reflection recorded.'}</p></div><div id="lesson-assumptions" tabIndex={-1} className="notebook-section"><h3>Starting assumptions</h3>{selected.assumptions.length ? <ul>{selected.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p className="muted">No assumptions recorded.</p>}</div><div id="lesson-hypotheses" tabIndex={-1} className="notebook-section"><h3>Working hypotheses</h3><p className="fine-print">These are tentative explanations, not fixed labels about you.</p>{selected.hypotheses.length ? selected.hypotheses.map((hypothesis) => <HypothesisCard key={hypothesis.id} hypothesis={hypothesis} reviews={state.reviews} />) : <p className="muted">No hypotheses recorded for this lesson.</p>}</div></> : <div className="notice">Finish this lesson to reveal its assumptions, reflection, and hypotheses.</div>}
+        {selected.complete ? <><div id="lesson-reflection" tabIndex={-1} className="notebook-section"><h3>Reflection before this lesson</h3><p className="preserve-lines">{selected.reflection || 'No prior reflection recorded.'}</p></div><div id="lesson-assumptions" tabIndex={-1} className="notebook-section"><h3>Starting assumptions</h3>{selected.assumptions.length ? <ul>{selected.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p className="muted">No assumptions recorded.</p>}</div><div id="lesson-hypotheses" tabIndex={-1} className="notebook-section"><h3>Working hypotheses</h3><p className="fine-print">These are tentative explanations, not fixed labels about you.</p>{selected.hypotheses.length ? selected.hypotheses.map((hypothesis) => <HypothesisCard key={hypothesis.id} hypothesis={hypothesis} reviews={state.reviews} />) : <p className="muted">No hypotheses recorded for this lesson.</p>}</div></> : <div className="notice">{selected.endedEarly ? 'You left this focused practice early. Your answers are saved.' : 'Finish this lesson to reveal its assumptions, reflection, and hypotheses.'}</div>}
         {selected.complete && selected.curriculum && <CurriculumDetails curriculum={selected.curriculum} reviews={state.reviews} lessonReviews={reviews} />}
         {selected.feedback && <div id="lesson-feedback-record" tabIndex={-1} className="notebook-section" data-testid="saved-lesson-feedback"><h3>Your lesson feedback</h3><p className="preserve-lines">{selected.feedback.text || 'No written feedback.'}</p><p className="fine-print">{selected.feedback.accidentalAttemptIds.length} accidental answers excluded · {date(selected.feedback.updatedAt)}</p></div>}
         {discussions.map(item => <div id={`lesson-conversation-${item.id}`} tabIndex={-1} className="notebook-section" key={item.id}><h3>Tutor conversation · {date(item.createdAt)}</h3>{item.feedbackText && <details className="plain-details"><summary>Feedback shared</summary><p className="preserve-lines">{item.feedbackText}</p></details>}<p className="preserve-lines">{item.reflection}</p>{item.questions.map(question => <div className="conversation-reply" key={question.id}><h4>{question.text}</h4><p className="preserve-lines">{question.answer ?? (question.skipped ? 'Skipped' : 'No reply yet')}</p></div>)}</div>)}
@@ -243,7 +245,7 @@ function Notebook({ state, selectedId, onSelect, onReview, onPractice }: { state
   </div>;
 }
 
-function ReviewDialog({ review, pending, error, onFlag, onClose }: { review: Review; pending: boolean; error: string; onFlag: (review: Review) => void; onClose: () => void }) {
+function ReviewDialog({ review, pending, error, onFlag, onGuide, onClose }: { review: Review; pending: boolean; error: string; onFlag: (review: Review) => void; onGuide: (concept: GuideConcept) => void; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useReviewTiming(review.attempt.id);
   useEffect(() => {
@@ -254,7 +256,43 @@ function ReviewDialog({ review, pending, error, onFlag, onClose }: { review: Rev
     return () => { element?.close(); document.body.style.overflow = previousOverflow; };
   }, []);
   return <dialog ref={dialog} className="review-dialog" aria-labelledby="review-title" data-testid="review-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div className="review-dialog-inner"><header className="review-dialog-header"><div><span className="eyebrow">Answer review</span><h2 id="review-title">{review.question.title}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close review" data-testid="close-review"><X size={22} /></button></header><div className="review-dialog-body">{error && <div className="notice error" role="alert">{error}</div>}<ReviewPanel review={review} pending={pending} onFlag={onFlag} /></div><footer className="review-dialog-footer"><button className="button primary" onClick={onClose} data-testid="back-to-practice">Done reviewing<ArrowRight size={16} /></button></footer></div>
+    <div className="review-dialog-inner"><header className="review-dialog-header"><div><span className="eyebrow">Answer review</span><h2 id="review-title">{review.question.title}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close review" data-testid="close-review"><X size={22} /></button></header><div className="review-dialog-body">{error && <div className="notice error" role="alert">{error}</div>}<ReviewPanel review={review} pending={pending} onFlag={onFlag} onGuide={onGuide} /></div><footer className="review-dialog-footer"><button className="button primary" onClick={onClose} data-testid="back-to-practice">Done reviewing<ArrowRight size={16} /></button></footer></div>
+  </dialog>;
+}
+
+function GuideDialog({ concept, guide, job, pending, error, canPractice, onClose, onDone, onReport, onPractice, onCancel, onRetry }: {
+  concept: GuideConcept; guide?: ConceptGuide; job: Job | null; pending: boolean; error: string; canPractice: boolean;
+  onClose: () => void; onDone: () => void; onReport: (action: GuideEvent['action']) => void;
+  onPractice: (length: number) => void; onCancel: () => void; onRetry: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [length, setLength] = useState(4);
+  const [report, setReport] = useState('');
+  const isThisConcept = job?.conceptId === concept.id && (job.kind === 'guide' || job.kind === 'focus');
+  const working = job?.status === 'running' && isThisConcept;
+  const failure = job?.status === 'error' && isThisConcept ? job.message : '';
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { element?.close(); document.body.style.overflow = previousOverflow; };
+  }, []);
+  return <dialog ref={dialog} className="review-dialog guide-dialog" aria-labelledby="guide-title" data-testid="guide-dialog" onCancel={event => { event.preventDefault(); onClose(); }} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="review-dialog-inner"><header className="review-dialog-header"><div><span className="eyebrow">Concept guide</span><h2 id="guide-title">{guide?.title ?? concept.name}</h2></div><button className="icon-button" aria-label="Close guide" onClick={onClose}><X size={22} /></button></header>
+      <div className="review-dialog-body">
+        {(error || failure) && <div className="notice error" role="alert">{error || failure}</div>}
+        {working && <div className="job-stage" role="status"><LoaderCircle size={20} className="spin" /><p>{job?.message}</p><button className="button compact quiet" onClick={onCancel}>Cancel</button></div>}
+        {!guide && !working && <div><p className="muted">{concept.description}</p><button className="button quiet" onClick={onRetry} disabled={pending}>Prepare guide</button></div>}
+        {guide && <><p className="guide-description">{guide.description}</p>
+          <div className="guide-examples">{guide.examples.map((example, index) => <div className="guide-example" key={index}><Code code={`${example.expression} // ${JSON.stringify(example.result)}`} /><p>{example.explanation}</p></div>)}</div>
+          <p className="guide-takeaway"><strong>Keep in mind:</strong> {guide.takeaway}</p>
+          {guide.links.length > 0 && <div className="review-section"><h3>More reading</h3>{guide.links.map(link => <a className="guide-link" key={link.url} href={link.url} target="_blank" rel="noopener noreferrer">{link.title} ↗</a>)}</div>}
+          <div className="review-section"><h3>How does this feel?</h3><p className="fine-print">Optional. Your response helps the tutor plan; it isn’t a grade.</p><div className="concept-links"><button className="button compact quiet" disabled={pending} onClick={() => { setReport('familiar'); onReport('familiar'); }} aria-pressed={report === 'familiar'}>I know this</button><button className="button compact quiet" disabled={pending} onClick={() => { setReport('unclear'); onReport('unclear'); }} aria-pressed={report === 'unclear'}>Still unclear</button></div></div>
+          {canPractice && <div className="review-section"><h3>Focused practice</h3><p className="fine-print">Try a few questions on this concept, then return to your lesson.</p><div className="concept-links"><button className="button compact quiet" onClick={() => setLength(4)} aria-pressed={length === 4}>4 cards</button><button className="button compact quiet" onClick={() => setLength(6)} aria-pressed={length === 6}>6 cards</button><button className="button compact primary" disabled={pending || Boolean(working)} onClick={() => onPractice(length)} data-testid="practice-concept">Practice this concept<ArrowRight size={15} /></button></div></div>}
+        </>}
+      </div><footer className="review-dialog-footer"><button className="button primary" onClick={guide ? onDone : onClose} disabled={pending}>{guide ? 'Done reading' : 'Back'}</button></footer>
+    </div>
   </dialog>;
 }
 
@@ -327,7 +365,7 @@ function LessonComplete({ lesson, reviews, discussion, job, pending, canPlan, re
         <button className="button compact quiet" disabled={disabled || !repliesChanged} onClick={() => onSave(draft)} data-testid="save-replies">{repliesChanged ? 'Save replies / skip blanks' : 'Replies saved'}</button>
       </> : <p className="fine-print">No follow-up needed. You can add more feedback or continue.</p>}
     </section>}
-    <div className="completion-actions"><button className="button primary" onClick={() => onNext(draft)} disabled={Boolean(pending) || !canPlan} data-testid="start-lesson">{pending === 'start' ? <LoaderCircle className="spin" size={18} /> : <ArrowRight size={18} />}{discussing ? 'Skip follow-up & next lesson' : 'Next lesson'}</button><button className="button quiet" onClick={onNotebook} disabled={Boolean(pending)}>Open notebook</button></div>
+    <div className="completion-actions"><button className="button primary" onClick={() => onNext(draft)} disabled={Boolean(pending) || !canPlan} data-testid="start-lesson">{pending === 'start' ? <LoaderCircle className="spin" size={18} /> : <ArrowRight size={18} />}{lesson.focus ? 'Return to lesson' : discussing ? 'Skip follow-up & next lesson' : 'Next lesson'}</button><button className="button quiet" onClick={onNotebook} disabled={Boolean(pending)}>Open notebook</button></div>
   </section>;
 }
 
@@ -354,6 +392,11 @@ export default function App() {
   const [error, setError] = useState('');
   const [connectionError, setConnectionError] = useState('');
   const [reviewId, setReviewId] = useState<string | null>(null);
+  const [guideConcept, setGuideConcept] = useState<GuideConcept | null>(null);
+  const [guideReturnReview, setGuideReturnReview] = useState<string | null>(null);
+  const [guideToken, setGuideToken] = useState('');
+  const [waitingForFocus, setWaitingForFocus] = useState(false);
+  const recordedGuide = useRef('');
   const [lastReviewId, setLastReviewId] = useState<string | null>(null);
   const [answerFeedback, setAnswerFeedback] = useState<{ id: string; correct: boolean | null } | null>(null);
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
@@ -371,7 +414,7 @@ export default function App() {
   const running = state?.job?.status === 'running';
   const discussing = running && state?.job?.kind === 'discussion';
   const chosenProvider = state?.providers.find((provider) => provider.id === state.settings.provider);
-  const readAnswerTime = useAnswerClock(state?.question?.id, view === 'practice' && !review && !pending);
+  const readAnswerTime = useAnswerClock(state?.question?.id, view === 'practice' && !review && !guideConcept && !pending && !running && !state?.lessonPreview?.length);
 
   const acceptState = useCallback((next: AppState) => {
     if (!mounted.current) return;
@@ -454,6 +497,45 @@ export default function App() {
     finally { busy.current = false; revision.current += 1; if (mounted.current) setPending(''); }
   }, [refresh]);
 
+  const openGuide = (concept: GuideConcept) => {
+    setGuideReturnReview(reviewId);
+    setReviewId(null);
+    setGuideConcept(concept);
+    setGuideToken(crypto.randomUUID());
+    void mutate('guide', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(concept.id)}/guide`, 'POST')));
+  };
+  const closeGuide = () => { setGuideConcept(null); if (guideReturnReview) setReviewId(guideReturnReview); setGuideReturnReview(null); };
+  const guide = state?.guides?.find(item => item.conceptId === guideConcept?.id);
+  useEffect(() => {
+    if (!guide || !guideConcept || pending || busy.current) return;
+    const key = `${guideToken}:${guide.version}`;
+    if (recordedGuide.current === key) return;
+    recordedGuide.current = key;
+    void mutate('guide-open', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/events`, 'POST', { action: 'opened' })));
+  }, [guide, guideConcept, guideToken, pending, mutate, acceptState]);
+  useEffect(() => {
+    if (waitingForFocus && state?.job?.kind === 'focus' && state.job.status === 'ready' && state.currentLesson?.focus) {
+      setGuideConcept(null); setGuideReturnReview(null); setReviewId(null); setView('practice'); setWaitingForFocus(false);
+    }
+    if (waitingForFocus && state?.job?.kind === 'focus' && ['error', 'cancelled'].includes(state.job.status)) setWaitingForFocus(false);
+  }, [waitingForFocus, state?.job, state?.currentLesson?.id]);
+  const guideEvent = (action: GuideEvent['action'], close = false) => {
+    if (!guideConcept) return;
+    void mutate('guide-event', async () => {
+      acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/events`, 'POST', { action }));
+      if (close) closeGuide();
+    });
+  };
+  const focusPractice = (length: number) => {
+    if (!guideConcept) return;
+    void mutate('focus', async () => {
+      if (!(await flushReviewSessions())) throw new Error('Review timing is waiting to sync. Reconnect and try again.');
+      setWaitingForFocus(true);
+      acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/practice`, 'POST', { length }));
+      setNow(Date.now());
+    });
+  };
+
   const saveFeedback = async (lessonId: string, draft: FeedbackDraft) => {
     const next = await api<AppState>(`/api/lessons/${encodeURIComponent(lessonId)}/feedback`, 'POST', { text: draft.text, accidentalAttemptIds: draft.accidentalAttemptIds });
     acceptState(next);
@@ -482,7 +564,7 @@ export default function App() {
     setNow(Date.now());
   });
   const submit = useCallback(async (answer: Answer) => {
-    if (!state?.question || reviewId || view !== 'practice' || busy.current || connectionError) return;
+    if (!state?.question || reviewId || guideConcept || state.lessonPreview?.length || running || view !== 'practice' || busy.current || connectionError) return;
     const question = state.question;
     const elapsedMs = Math.max(0, Math.round(readAnswerTime()));
     setAnswerFeedback(null);
@@ -493,7 +575,7 @@ export default function App() {
       uncertainAnswer.current = null;
       setLastReviewId(result.review.attempt.id);
     });
-  }, [state, reviewId, view, connectionError, acceptState, mutate, readAnswerTime]);
+  }, [state, reviewId, guideConcept, running, view, connectionError, acceptState, mutate, readAnswerTime]);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !['ArrowLeft', 'ArrowRight', 'ArrowDown'].includes(event.key)) return;
@@ -508,7 +590,7 @@ export default function App() {
   }, [submit, view, state?.question, reviewId, pending, connectionError]);
   const flag = (item: Review) => void mutate('flag', async () => acceptState(await api<AppState>(`/api/attempts/${encodeURIComponent(item.attempt.id)}/flag`, 'POST', { flagged: !item.attempt.flagged, reason: 'flawed-question' })));
   const pointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-    if (pending || reviewId || connectionError || event.button !== 0 || !event.isPrimary) return;
+    if (pending || reviewId || guideConcept || running || connectionError || event.button !== 0 || !event.isPrimary) return;
     if ((event.target as HTMLElement).closest('button, a, input, textarea, select, [contenteditable="true"]')) return;
     pointer.current = { x: event.clientX, y: event.clientY, id: event.pointerId, horizontal: false };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -534,8 +616,9 @@ export default function App() {
     if (start?.horizontal && start.id === event.pointerId && Math.abs(event.clientX - start.x) > 72) void submit(event.clientX > start.x ? 'correct' : 'buggy');
   };
   const lesson = state?.currentLesson || null;
+  const lessonNumber = lesson && state ? state.lessons.length - state.lessons.findIndex(item => item.id === lesson.id) : 0;
   const changeView = (next: typeof view) => { setReviewId(null); setView(next); };
-  const answerDisabled = Boolean(pending) || Boolean(connectionError) || Boolean(reviewId);
+  const answerDisabled = Boolean(pending) || Boolean(connectionError) || Boolean(reviewId) || Boolean(guideConcept) || Boolean(running);
   const previousAnswer = lastReview && !running ? <PreviousAnswer review={lastReview} disabled={Boolean(pending)} onReview={() => setReviewId(lastReview.attempt.id)} /> : null;
 
   return <div className={`app-shell view-${view}${view === 'practice' && state?.question ? ' has-active-card' : ''}`}>
@@ -546,8 +629,9 @@ export default function App() {
         : view === 'settings' ? <SettingsPanel state={state} settings={settings} setSettings={setSettings} pending={Boolean(pending) || running} onSave={() => void mutate('settings', async () => acceptState(await api<AppState>('/api/settings', 'PUT', settings)))} />
         : view === 'notebook' ? <Notebook state={state} selectedId={selectedLessonId} onSelect={setSelectedLessonId} onReview={setReviewId} onPractice={() => changeView('practice')} />
         : <div className="practice-layout"><div className="practice-main">
-          {state.question && lesson ? <>
-            <div className="lesson-progress"><div><span className="eyebrow">Lesson {state.lessons.length}</span><span className="muted">Card {lesson.answered + 1} of {lesson.total}</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.answered} data-testid="lesson-progress"><span style={{ width: `${lesson.answered / lesson.total * 100}%` }} /></div></div>
+          {state.lessonPreview?.length && lesson && !running ? <section className="panel lesson-preview" data-testid="lesson-preview"><div className="eyebrow">Before you begin · optional</div><h1>Explore new concepts</h1><p className="muted">This lesson may introduce these ideas. Open a guide, try focused practice, or start right away.</p><div className="preview-concepts">{state.lessonPreview.map(concept => <button className="button quiet" key={concept.id} onClick={() => openGuide(concept)} data-testid="preview-concept"><BookOpen size={17} />{concept.name}<ChevronRight size={15} /></button>)}</div><button className="button primary" data-testid="begin-prepared-lesson" disabled={Boolean(pending)} onClick={() => void mutate('begin', async () => acceptState(await api<AppState>(`/api/lessons/${encodeURIComponent(lesson.id)}/start`, 'POST')))}>Start lesson<ArrowRight size={17} /></button></section>
+          : state.question && lesson && !running ? <>
+            <div className="lesson-progress"><div><span className="eyebrow">{lesson.focus ? 'Focused practice' : `Lesson ${lessonNumber}`}</span><span className="muted">Card {lesson.answered + 1} of {lesson.total}</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.answered} data-testid="lesson-progress"><span style={{ width: `${lesson.answered / lesson.total * 100}%` }} /></div>{lesson.focus && <button className="text-button focus-exit" disabled={Boolean(pending)} onClick={() => void mutate('resume', async () => acceptState(await api<AppState>('/api/lessons/resume', 'POST')))}>Leave practice and return to lesson<ChevronRight size={14} /></button>}</div>
             <div className="card-stack"><div className="card-stack-back" aria-hidden="true" /><article className={`exercise-card ${dragging ? 'dragging' : ''}`} data-testid="exercise-card" data-question-id={state.question.id} style={{ transform: `translateX(${drag}px) rotate(${drag * .055}deg)` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} aria-busy={pending === 'answer'}>
               {drag > 25 && <div className="swipe-stamp correct" data-testid="swipe-correct-overlay">CORRECT</div>}{drag < -25 && <div className="swipe-stamp buggy" data-testid="swipe-buggy-overlay">BUGGY</div>}
               <div className="exercise-intro"><div className="section-heading"><span className="small-label">Target objective</span><Badge>JavaScript</Badge></div><h1 ref={heading} tabIndex={-1}>{state.question.title}</h1><div className="specification"><p>{state.question.specification}</p></div></div><Code code={state.question.code} /><div className="card-footnote"><span>↔ Drag to decide</span><span>Buggy ← → Correct</span></div>
@@ -559,7 +643,7 @@ export default function App() {
             : <>
               {state.job?.status === 'error' && <div className="notice error" role="alert"><strong>{state.job.kind === 'discussion' ? 'Tutor response stopped' : 'Lesson preparation stopped'}</strong><p>{state.job.message}</p><p className="fine-print">{state.job.kind === 'discussion' ? 'Your feedback is saved. Retry or continue to the next lesson.' : 'Check Setup, then retry.'}</p></div>}
               {state.job?.status === 'cancelled' && <div className="notice">{state.job.kind === 'discussion' ? 'Follow-up cancelled. Your feedback is saved.' : 'Planning cancelled. You can try again.'}</div>}
-              {lesson?.complete ? <><div className="lesson-progress"><div><span className="eyebrow">Lesson {state.lessons.length}</span><span className="muted">Complete</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.total} data-testid="lesson-progress"><span style={{ width: '100%' }} /></div></div><LessonComplete key={lesson.id} lesson={lesson} reviews={state.reviews.filter((item) => item.attempt.lessonId === lesson.id)} discussion={state.discussions.filter(item => item.lessonId === lesson.id).at(-1)} job={state.job} pending={pending} canPlan={!connectionError && Boolean(chosenProvider?.available)} reflective={state.settings.tutorMode === 'reflective'} onSave={(draft) => void mutate('feedback', () => saveCompletion(draft))} onDiscuss={(draft) => void discussFeedback(draft)} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onNext={(draft) => void startLesson(false, draft)} onReview={setReviewId} onNotebook={() => { setSelectedLessonId(lesson.id); changeView('notebook'); }} /></>
+              {lesson?.complete ? <><div className="lesson-progress"><div><span className="eyebrow">{lesson.focus ? 'Focused practice' : `Lesson ${lessonNumber}`}</span><span className="muted">Complete</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.total} data-testid="lesson-progress"><span style={{ width: '100%' }} /></div></div><LessonComplete key={lesson.id} lesson={lesson} reviews={state.reviews.filter((item) => item.attempt.lessonId === lesson.id)} discussion={state.discussions.filter(item => item.lessonId === lesson.id).at(-1)} job={state.job} pending={pending} canPlan={!connectionError && (Boolean(lesson.focus) || Boolean(chosenProvider?.available))} reflective={state.settings.tutorMode === 'reflective'} onSave={(draft) => void mutate('feedback', () => saveCompletion(draft))} onDiscuss={(draft) => void discussFeedback(draft)} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onNext={(draft) => lesson.focus ? void mutate('resume', async () => { if (discussing) acceptState(await api<AppState>('/api/cancel', 'POST')); await saveCompletion(draft); acceptState(await api<AppState>('/api/lessons/resume', 'POST')); }) : void startLesson(false, draft)} onReview={setReviewId} onNotebook={() => { setSelectedLessonId(lesson.id); changeView('notebook'); }} /></>
                 : <section className="welcome-panel"><Code2 size={38} /><h1 ref={heading} tabIndex={-1}>Read code. Make a call.</h1><p className="welcome-copy">Swipe left for buggy. Right for correct. IDK when you’re unsure.</p><div className="welcome-actions"><button className="button primary" onClick={() => void startLesson(false)} disabled={Boolean(pending) || Boolean(connectionError) || !chosenProvider?.available} data-testid="start-lesson">{pending === 'start' ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{state.job?.status === 'error' ? 'Retry lesson' : 'Start lesson'}<ArrowRight size={18} /></button>{state.settings.provider !== 'demo' && <button className="button quiet" onClick={() => void startLesson(true)} disabled={Boolean(pending) || Boolean(connectionError)} data-testid="try-demo"><FlaskConical size={17} /> Try demo</button>}</div><div className="current-setup"><span>{PROVIDER_NAMES[state.settings.provider]} · {state.settings.batchSize} cards</span><button className="text-button" onClick={() => changeView('settings')}>Setup<ChevronRight size={14} /></button></div>{!chosenProvider?.available && <p className="fine-print">Set up your local agent, or try the demo.</p>}</section>}
             </>}
           {!state.question && previousAnswer}
@@ -571,6 +655,7 @@ export default function App() {
         <div><span>Previous answer</span><strong>{quickResultLabel(answerFeedback.correct)}</strong></div>
       </div>}
     </div>
-    {review && <ReviewDialog key={review.attempt.id} review={review} pending={Boolean(pending) || running} error={error || connectionError} onFlag={flag} onClose={() => setReviewId(null)} />}
+    {review && <ReviewDialog key={review.attempt.id} review={review} pending={Boolean(pending) || running} error={error || connectionError} onFlag={flag} onGuide={openGuide} onClose={() => setReviewId(null)} />}
+    {guideConcept && <GuideDialog key={guideToken} concept={guideConcept} guide={guide} job={state?.job ?? null} pending={Boolean(pending)} error={error || connectionError} canPractice={Boolean(state?.currentLesson && !state.currentLesson.focus) && (state?.settings.provider !== 'demo' || guideConcept.id === 'demo-code-review')} onClose={closeGuide} onDone={() => guideEvent('finished', true)} onReport={action => guideEvent(action)} onPractice={focusPractice} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onRetry={() => void mutate('guide', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/guide`, 'POST')))} />}
   </div>;
 }

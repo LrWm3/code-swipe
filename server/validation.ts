@@ -3,7 +3,7 @@ import type { FunctionSignature, JsonValue, ProposedLesson, TutorContext, Valida
 import { LESSON_SIZES } from '../src/lesson-sizes.ts';
 import { PURPOSES } from '../src/types.ts';
 import { curriculumSchema, questionPlanSchema, validateSchema } from './prompts.ts';
-import { validateCurriculum } from './curriculum-validation.ts';
+import { mirrors, validateCurriculum } from './curriculum-validation.ts';
 import { questionSkills } from './skill-evidence.ts';
 import { validateArguments, validateQuestionFormat, validateSignature } from './question-format.ts';
 
@@ -134,7 +134,7 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
     string(hypothesis.nextProbe, `${path}.nextProbe`, 1_000);
   }
   const batchSize = context.settings.batchSize;
-  if (!LESSON_SIZES.some(size => size === batchSize)) reject('settings.batchSize', 'must be 6, 8, or 12.');
+  if (!LESSON_SIZES.some(size => size === batchSize) && !(context.focus && batchSize === 4)) reject('settings.batchSize', 'must be 6, 8, or 12 (or 4 for focused practice).');
   const questions = list(lesson.questions, 'questions', batchSize, batchSize);
   const unique = { title: new Set<string>(), code: new Set<string>() };
   for (let i = 0; i < questions.length; i++) {
@@ -161,6 +161,7 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
     oneOf(question.purpose, `${path}.purpose`, [...PURPOSES]);
     try { validateSchema(question.plan, questionPlanSchema, `${path}.plan`); }
     catch (error) { reject(path, (error as Error).message); }
+    if (context.focus && !(question.plan as NonNullable<ProposedLesson['questions'][number]['plan']>).conceptIds.includes(context.focus.concept.id)) reject(`${path}.plan.conceptIds`, 'focused practice must target the selected concept.');
     if ((question.plan as ProposedLesson['questions'][number]['plan'])!.purposes.includes('retention')) {
       const targetConcepts = (question.plan as NonNullable<ProposedLesson['questions'][number]['plan']>).skillUses!
         .filter(use => use.role !== 'incidental').map(use => use.conceptId);
@@ -384,6 +385,13 @@ export async function execute(code: string, input: JsonValue, path: string, sign
 
 export async function validateLesson(proposal: unknown, context: TutorContext, signal?: AbortSignal): Promise<ProposedLesson & { reports: ValidationReport[] }> {
   const lesson = structure(proposal, context);
+  if (context.focus?.avoidQuestions?.length) {
+    for (let index = 0; index < lesson.questions.length; index++) {
+      if (context.focus.avoidQuestions.some(parent => mirrors(lesson.questions[index], parent))) {
+        reject(`questions[${index}]`, 'duplicates an unanswered question in the paused lesson; use a different task and reference implementation.');
+      }
+    }
+  }
   const reports: ValidationReport[] = [];
   for (let i = 0; i < lesson.questions.length; i++) {
     const question = lesson.questions[i];

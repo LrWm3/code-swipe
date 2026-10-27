@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { Job, ProviderStatus } from '../src/types.ts';
 import { AppError, LocalStore, parseSettings } from './store.ts';
-import { detectProviders, generateLesson, generateDiscussion } from './providers.ts';
+import { detectProviders, generateLesson, generateDiscussion, generateGuide } from './providers.ts';
 import { createDemoLesson } from './demo.ts';
 import { validateLesson } from './validation.ts';
+import { reviewedGuide } from './concept-guides.ts';
 
 export class TutorService {
   job: Job | null = null;
@@ -22,18 +23,27 @@ export class TutorService {
   requireIdle() {
     if (this.job?.status === 'running') throw new AppError('Cancel the current tutor run before changing settings or evidence.', 409);
   }
-  plan() {
+  plan(focusRequest?: { conceptId: string; length: number }) {
     this.requireIdle();
-    if (this.store.pendingQuestion()) throw new AppError('Finish the current lesson before planning another.', 409);
+    const parent = this.store.activeLesson();
+    const concept = focusRequest ? this.store.concept(focusRequest.conceptId) : null;
+    if (focusRequest && (!concept || !parent || parent.focus || ![4, 6].includes(focusRequest.length))) throw new AppError('Choose a concept and 4 or 6 cards while a main lesson is open.', 400);
+    if (focusRequest && this.store.snapshot().settings.provider === 'demo' && concept?.id !== 'demo-code-review') throw new AppError('Choose Codex or OpenCode in Setup to generate focused practice for this concept.');
+    if (!focusRequest && this.store.pendingQuestion()) throw new AppError('Finish the current lesson before planning another.', 409);
     let context = this.store.context();
     if (!this.providers.some(item => item.id === context.settings.provider && item.available)) {
       throw new AppError(`${context.settings.provider} is unavailable. Install its CLI and restart, or choose practice demo.`, 503);
     }
-    this.store.skipUnansweredDiscussions();
+    if (!focusRequest) this.store.skipUnansweredDiscussions();
     context = this.store.context();
+    if (focusRequest && concept && parent) {
+      context.settings = { ...context.settings, batchSize: focusRequest.length };
+      const answered = new Set(this.store.snapshot().attempts.filter(item => item.lessonId === parent.id).map(item => item.exerciseId));
+      context.focus = { concept, parentLessonId: parent.id, avoidQuestions: parent.questions.filter(item => !answered.has(item.id)) };
+    }
     this.controller = new AbortController();
     const controller = this.controller;
-    const job: Job = { id: randomUUID(), kind: 'lesson', status: 'running', stage: 'planning', startedAt: new Date().toISOString(), message: 'Preparing the lesson…' };
+    const job: Job = { id: randomUUID(), kind: focusRequest ? 'focus' : 'lesson', ...(concept ? { conceptId: concept.id } : {}), status: 'running', stage: 'planning', startedAt: new Date().toISOString(), message: 'Preparing the lesson…' };
     this.job = job;
     this.store.recordJob(job);
     const active = () => !controller.signal.aborted && this.job?.id === job.id && job.status === 'running';
@@ -59,7 +69,7 @@ export class TutorService {
             continue;
           }
           if (!active()) return;
-          this.store.commitLesson(validated, context.settings);
+          this.store.commitLesson(validated, context.settings, context.focus ? { conceptId: context.focus.concept.id, parentLessonId: context.focus.parentLessonId } : undefined);
           Object.assign(job, { status: 'ready', stage: 'ready', message: 'Lesson checked. Predictions committed. Ready to play.' });
           this.store.recordJob(job);
           return;
@@ -71,6 +81,40 @@ export class TutorService {
       }
     })();
   }
+  prepareGuide(conceptId: string) {
+    this.requireIdle();
+    const concept = this.store.concept(conceptId);
+    if (!concept) throw new AppError('Concept not found.', 404);
+    if (this.store.snapshot().guides?.some(item => item.conceptId === conceptId)) return;
+    const curated = reviewedGuide(concept);
+    if (curated) { this.store.saveGuide(curated); return; }
+    const settings = this.store.snapshot().settings;
+    if (!this.providers.some(item => item.id === settings.provider && item.available) || settings.provider === 'demo') {
+      throw new AppError('Choose an available Codex or OpenCode tutor in Setup to prepare this guide.', 503);
+    }
+    this.controller = new AbortController();
+    const controller = this.controller;
+    const job: Job = { id: randomUUID(), kind: 'guide', conceptId, status: 'running', stage: 'preparing', startedAt: new Date().toISOString(), message: 'Preparing your concept guide…' };
+    this.job = job;
+    this.store.recordJob(job);
+    const active = () => !controller.signal.aborted && this.job?.id === job.id && job.status === 'running';
+    this.work = (async () => {
+      try {
+        const guide = await generateGuide(settings, concept, { signal: controller.signal, onProgress: message => {
+          if (active()) { job.message = message; this.store.recordJob(job); }
+        } });
+        if (!active()) return;
+        this.store.saveGuide(guide);
+        Object.assign(job, { status: 'ready', stage: 'ready', message: 'Concept guide ready.' });
+        this.store.recordJob(job);
+      } catch (error) {
+        if (!active()) return;
+        Object.assign(job, { status: 'error', stage: 'error', message: error instanceof Error ? error.message : 'Guide preparation failed. Retry.' });
+        this.store.recordJob(job);
+      }
+    })();
+  }
+
   discuss(lessonId: string) {
     this.requireIdle();
     let context = this.store.discussionContext(lessonId);

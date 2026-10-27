@@ -2,7 +2,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { DiscussionContext, ProposedDiscussion, ProposedLesson, ProviderId, ProviderStatus, TutorContext } from '../src/types.ts';
+import type { ConceptGuide, GuideConcept, DiscussionContext, ProposedDiscussion, ProposedLesson, ProviderId, ProviderStatus, TutorContext } from '../src/types.ts';
+import { guidePrompt, guideSchema, parseGuide } from './concept-guides.ts';
 import { buildDiscussionPrompt, discussionOutputSchema, parseDiscussionOutput } from './discussion.ts';
 import { buildTutorPrompt, lessonSchemaForBatch, parseLessonOutput } from './prompts.ts';
 
@@ -213,7 +214,7 @@ export function parseOpenCodeOutput(stdout: string): string {
 
 async function runStructuredTutor(
   settings: TutorContext['settings'],
-  request: { prompt: string; schema: unknown; subject: 'lesson' | 'discussion' },
+  request: { prompt: string; schema: unknown; subject: 'lesson' | 'discussion' | 'guide' },
   options: GenerationOptions,
 ): Promise<string> {
   const provider = settings.provider;
@@ -229,7 +230,7 @@ async function runStructuredTutor(
     if (provider === 'codex') requireSupportedCodex(await cliVersion(provider, directory, env, options.signal));
     const { prompt, schema, subject } = request;
     if (Buffer.byteLength(prompt) > 512 * 1024) throw new Error('Tutor history is too large for one request. Reduce saved history before retrying.');
-    options.onProgress(subject === 'lesson' ? `Waiting for ${provider} to plan and check the lesson…` : `Waiting for ${provider} to reflect on the lesson…`);
+    options.onProgress(subject === 'lesson' ? `Waiting for ${provider} to plan and check the lesson…` : subject === 'guide' ? `Waiting for ${provider} to prepare the guide…` : `Waiting for ${provider} to reflect on the lesson…`);
     let raw: string;
     if (provider === 'codex') {
       const schemaPath = join(directory, `${subject}-schema.json`);
@@ -285,4 +286,9 @@ export async function generateDiscussion(context: DiscussionContext, options: Ge
   }, options);
   if (options.signal.aborted) throw abortError();
   return parseDiscussionOutput(raw);
+}
+
+export async function generateGuide(settings: TutorContext['settings'], concept: GuideConcept, options: GenerationOptions): Promise<ConceptGuide> {
+  const raw = await runStructuredTutor(settings, { prompt: guidePrompt(concept), schema: guideSchema, subject: 'guide' }, options);
+  return parseGuide(raw, concept, options.signal);
 }

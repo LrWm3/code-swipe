@@ -351,3 +351,20 @@ td { color: #b1bac4; }
 .has-active-card .exercise-card .code-block { flex: 1; min-height: 0; max-height: none; }
 .has-active-card .card-footnote { flex-shrink: 0; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+.lesson-preview { padding: 28px; display: grid; gap: 16px; }
+.lesson-preview h1 { margin: 0; }
+.preview-concepts, .concept-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.preview-concepts { flex-direction: column; align-items: stretch; }
+.preview-concepts .button { justify-content: flex-start; }
+.preview-concepts .button svg:last-child { margin-left: auto; }
+.lesson-preview > .button { justify-self: start; }
+.guide-description, .guide-takeaway, .guide-example p { line-height: 1.7; }
+.guide-examples { display: grid; gap: 14px; margin: 18px 0; }
+.guide-example { border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.guide-example .code-block { border: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px 15px; }
+.guide-example p { padding: 10px 15px; font-size: .8rem; }
+.guide-takeaway { margin: 18px 0; }
+.guide-link { color: var(--blue); display: block; margin-top: 8px; }
+.concept-links [aria-pressed="true"] { border-color: var(--blue); color: var(--blue); }
+.focus-exit { margin-top: 10px; }

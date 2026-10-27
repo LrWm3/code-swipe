@@ -136,7 +136,7 @@ const EXAMPLES: Example[] = [
 ];
 
 export function createDemoLesson(context: TutorContext): ProposedLesson {
-  const count = LESSON_SIZES.some(size => size === context.settings.batchSize) ? context.settings.batchSize : DEFAULT_LESSON_SIZE;
+  const count = LESSON_SIZES.some(size => size === context.settings.batchSize) || (context.focus && context.settings.batchSize === 4) ? context.settings.batchSize : DEFAULT_LESSON_SIZE;
   const questions: ProposedQuestion[] = EXAMPLES.slice(0, count).map((example, index) => ({
     signature: structuredClone(example.signature),
     title: example.title,
@@ -167,6 +167,51 @@ export function createDemoLesson(context: TutorContext): ProposedLesson {
       variantReason: 'Leave the opposite implementation unasked; use the reference for optional review rather than another copy of this task.',
     },
   }));
+  if (context.focus?.concept.id === 'demo-code-review') {
+    const samples = [
+      { name: 'hasItem', params: ['items', 'target'], title: 'Find an item', spec: 'Return true if the target appears in the list.',
+        docs: ['@param {string[]} items - Items to search. Do not modify this array.', '@param {string} target - Item to find.', '@returns {boolean} Whether the item is present.'],
+        code: 'return items.indexOf(target) > 0;', reference: 'return items.includes(target);', verdict: 'buggy' as const,
+        explanation: 'A match at index 0 is present, but the comparison excludes it.',
+        tests: [[[['a'], 'a'], true], [[['a', 'b'], 'b'], true], [[[], 'a'], false], [[['a'], 'b'], false]] },
+      { name: 'countAtLeast', params: ['values', 'minimum'], title: 'Count values at least a minimum', spec: 'Count values that are at least the minimum.',
+        docs: ['@param {number[]} values - Finite numbers. Do not modify this array.', '@param {number} minimum - Finite minimum.', '@returns {number} Number of matching values.'],
+        code: 'return values.filter(value => value >= minimum).length;', reference: 'return values.filter(value => value >= minimum).length;', verdict: 'correct' as const,
+        explanation: 'The comparison includes values equal to the minimum.',
+        tests: [[[[0, 1], 0], 2], [[[1, 2], 2], 1], [[[], 2], 0], [[[3, 4], 5], 0]] },
+      { name: 'firstNegativeIndex', params: ['values'], title: 'Find the first negative value', spec: 'Return the index of the first negative value, or -1 if there is none.',
+        docs: ['@param {number[]} values - Finite numbers. Do not modify this array.', '@returns {number} First matching index, or -1.'],
+        code: 'return values.findIndex(value => value < 0) || -1;', reference: 'return values.findIndex(value => value < 0);', verdict: 'buggy' as const,
+        explanation: 'Index 0 is falsy, so the fallback incorrectly changes it to -1.',
+        tests: [[[[-1]], 0], [[[1, -2]], 1], [[[]], -1], [[[0, 2]], -1]] },
+      { name: 'keepEvenValues', params: ['values'], title: 'Keep even values', spec: 'Return the even values in their original order.',
+        docs: ['@param {number[]} values - Integers. Do not modify this array.', '@returns {number[]} Even values in their original order.'],
+        code: 'return values.filter(value => value % 2 === 0);', reference: 'return values.filter(value => value % 2 === 0);', verdict: 'correct' as const,
+        explanation: 'The remainder test includes zero and negative even integers.',
+        tests: [[[[]], []], [[[0, 1]], [0]], [[[-4, 3]], [-4]], [[[2, 2]], [2, 2]]] },
+      { name: 'hasAboveLimit', params: ['values', 'limit'], title: 'Find a value above the limit', spec: 'Return true if any value is above the limit.',
+        docs: ['@param {number[]} values - Finite values. Do not modify this array.', '@param {number} limit - Finite limit.', '@returns {boolean} Whether a value exceeds the limit.'],
+        code: 'return values.some(value => value >= limit);', reference: 'return values.some(value => value > limit);', verdict: 'buggy' as const,
+        explanation: 'A value equal to the limit does not exceed it.',
+        tests: [[[[1, 2], 2], false], [[[1, 3], 2], true], [[[], 0], false], [[[0], 1], false]] },
+      { name: 'sumNonnegativeValues', params: ['values'], title: 'Sum nonnegative values', spec: 'Return the sum of all nonnegative values, or 0 if none qualify.',
+        docs: ['@param {number[]} values - Finite numbers. Do not modify this array.', '@returns {number} Sum of the nonnegative values.'],
+        code: 'return values.filter(value => value >= 0).reduce((total, value) => total + value, 0);',
+        reference: 'return values.filter(value => value >= 0).reduce((total, value) => total + value, 0);', verdict: 'correct' as const,
+        explanation: 'Only values at least zero contribute, with an initial total of zero.',
+        tests: [[[[]], 0], [[[-2, 3]], 3], [[[0, 4]], 4], [[[-3, -1]], 0]] },
+    ];
+    // Six-card practice also includes two different applications from the demo.
+    for (let index = 0; index < Math.min(samples.length, count); index++) {
+      const item = samples[index];
+      const doc = '/**\n' + item.docs.map(line => ` * ${line}\n`).join('') + ' */\n';
+      const source = (body: string) => `${doc}function ${item.name}(${item.params.join(', ')}) {\n  ${body}\n}`;
+      Object.assign(questions[index], { signature: { name: item.name, parameters: item.params }, title: item.title, specification: item.spec,
+        code: source(item.code), referenceCode: source(item.reference), verdict: item.verdict, explanation: item.explanation,
+        tests: item.tests.map(([input, expected]) => ({ input, expected, note: 'Boundary example.' })) });
+      questions[index].plan!.familyId = `demo-focus-${index + 1}`;
+    }
+  }
   for (const question of questions) question.purpose = question.plan!.purposes[0];
   const prior = context.history.flatMap(entry => entry.attempts.filter(attempt => !attempt.flagged).map(attempt => ({
     attempt, question: entry.lesson.questions.find(question => question.id === attempt.exerciseId),

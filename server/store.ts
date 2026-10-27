@@ -8,7 +8,7 @@ import { PURPOSES } from '../src/types.ts';
 import { buildCurriculumMemory } from './curriculum-memory.ts';
 import { validateRetrofit } from './skill-evidence.ts';
 import { presentationArchiveHash, revisedQuestion, validatePresentationRevision, verifyPresentationBehavior } from './presentation-revisions.ts';
-import type { PresentationRevision, SkillRetrofit } from '../src/types.ts';
+import type { ConceptGuide, GuideConcept, GuideEvent, PresentationRevision, SkillRetrofit } from '../src/types.ts';
 
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -93,7 +93,9 @@ export class LocalStore {
           priorRevisions.push(revision);
         }
         if (!Array.isArray(this.data.feedback) || !Array.isArray(this.data.reviewSessions) || !Array.isArray(this.data.discussions)) throw new Error('Invalid feedback history.');
+        if (this.data.activeLessonId && !this.data.lessons.some(lesson => lesson.id === this.data.activeLessonId)) throw new Error('Active lesson is missing.');
         for (const lesson of this.data.lessons) {
+          if (lesson.focus && !this.data.lessons.some(parent => parent.id === lesson.focus!.parentLessonId && parent.id !== lesson.id && !parent.focus)) throw new Error('A focused lesson has no valid parent.');
           if (lesson.predictionHash !== lessonHash(lesson)) throw new Error('A committed lesson has changed.');
           const artifact = JSON.parse(readFileSync(join(this.directory, 'plans', `${lesson.id}.json`), 'utf8')) as Lesson;
           if (artifact.predictionHash !== lesson.predictionHash || lessonHash(artifact) !== lesson.predictionHash) throw new Error('A plan artifact has changed.');
@@ -133,6 +135,55 @@ export class LocalStore {
     return { imported: true, fixtures };
   }
 
+  concept(id: string): GuideConcept | null {
+    if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(id)) return null;
+    const definitions = [
+      ...(this.data.skillRetrofits ?? []).flatMap(review => review.concepts),
+      ...this.data.lessons.flatMap(lesson => lesson.curriculum?.conceptUpdates ?? []),
+    ];
+    const definition = definitions.filter(item => item.id === id).at(-1);
+    return definition ? { id, name: definition.name, description: definition.description } : null;
+  }
+
+  previewConcepts(): GuideConcept[] {
+    const lesson = this.activeLesson();
+    if (!lesson || lesson.focus || this.data.startedLessonIds?.includes(lesson.id)
+      || this.data.attempts.some(item => item.lessonId === lesson.id)) return [];
+    const frontier = lesson.curriculum?.frontier ?? [];
+    const updates = lesson.curriculum?.conceptUpdates ?? [];
+    const ids = frontier.filter(item => item.decision === 'introduce' || (item.decision === 'explore' && updates.some(c => c.id === item.conceptId && c.familiarity === 'unknown')))
+      .map(item => item.conceptId);
+    for (const question of lesson.questions) if (question.plan?.purposes.includes('introduction')) {
+      for (const id of question.plan.conceptIds) if (updates.some(concept => concept.id === id && concept.familiarity === 'unknown')) ids.push(id);
+    }
+    return [...new Set(ids)].map(id => this.concept(id)).filter((item): item is GuideConcept => Boolean(item));
+  }
+
+  startPreparedLesson(id: string): void {
+    if (this.activeLesson()?.id !== id || !this.pendingQuestion()) throw new AppError('This lesson is no longer current.', 409);
+    if (!(this.data.startedLessonIds ?? []).includes(id)) this.update({ ...this.data, startedLessonIds: [...this.data.startedLessonIds ?? [], id] });
+  }
+
+  resumeParent(): void {
+    const lesson = this.activeLesson();
+    if (!lesson?.focus) throw new AppError('No focused practice is active.', 409);
+    if (!this.data.lessons.some(item => item.id === lesson.focus!.parentLessonId)) throw new AppError('The original lesson was not found.', 409);
+    const endedFocusIds = this.pendingQuestion() ? [...new Set([...(this.data.endedFocusIds ?? []), lesson.id])] : this.data.endedFocusIds;
+    this.update({ ...this.data, activeLessonId: lesson.focus.parentLessonId, ...(endedFocusIds ? { endedFocusIds } : {}) });
+  }
+
+  saveGuide(guide: ConceptGuide): void {
+    if (!this.concept(guide.conceptId)) throw new AppError('Concept not found.', 404);
+    this.update({ ...this.data, guides: [...(this.data.guides ?? []).filter(item => item.conceptId !== guide.conceptId), structuredClone(guide)] });
+  }
+
+  recordGuideEvent(conceptId: string, action: GuideEvent['action']): void {
+    const guide = this.data.guides?.find(item => item.conceptId === conceptId);
+    if (!guide || !['opened', 'finished', 'familiar', 'unclear'].includes(action)) throw new AppError('Open a prepared guide before recording an action.');
+    const event: GuideEvent = { id: randomUUID(), conceptId, version: guide.version, lessonId: this.activeLesson()?.id ?? null, at: new Date().toISOString(), action };
+    this.update({ ...this.data, guideEvents: [...this.data.guideEvents ?? [], event] });
+  }
+
   private persist() {
     const temp = `${this.file}.${randomUUID()}.tmp`;
     writeFileSync(temp, JSON.stringify(this.data, null, 2) + '\n', { mode: 0o600 });
@@ -148,20 +199,26 @@ export class LocalStore {
 
   saveSettings(settings: Settings) { this.update({ ...this.data, settings: parseSettings(settings) }); }
 
+  activeLesson(): Lesson | undefined {
+    return this.data.activeLessonId ? this.data.lessons.find(lesson => lesson.id === this.data.activeLessonId) : this.data.lessons.at(-1);
+  }
+
   pendingQuestion() {
-    const lesson = this.data.lessons.at(-1);
+    const lesson = this.activeLesson();
     if (!lesson) return null;
     const answered = new Set(this.data.attempts.filter(item => item.lessonId === lesson.id).map(item => item.exerciseId));
     return structuredClone(lesson.questions.find(item => !answered.has(item.id)) ?? null);
   }
 
-  commitLesson(proposal: ProposedLesson & { reports: ValidationReport[] }, settings: Settings): Lesson {
-    if (this.pendingQuestion()) throw new AppError('Finish the current lesson before starting another.', 409);
+  commitLesson(proposal: ProposedLesson & { reports: ValidationReport[] }, settings: Settings, focus?: Lesson['focus']): Lesson {
+    if (focus && (this.activeLesson()?.id !== focus.parentLessonId || this.activeLesson()?.focus)) throw new AppError('The main lesson changed; reopen the guide and try again.', 409);
+    if (!focus && this.pendingQuestion()) throw new AppError('Finish the current lesson before starting another.', 409);
     if (proposal.questions.length !== proposal.reports.length) throw new Error('Missing exercise validation reports.');
     proposal = structuredClone(proposal);
     const lesson: Lesson = {
       id: randomUUID(), createdAt: new Date().toISOString(), provider: settings.provider, model: settings.model,
       tutorMode: settings.tutorMode, interests: settings.interests,
+      ...(focus ? { focus } : {}),
       objective: proposal.objective, rationale: proposal.rationale, assumptions: proposal.assumptions,
       reflection: proposal.reflection, hypotheses: proposal.hypotheses,
       ...(proposal.curriculum ? { curriculum: proposal.curriculum } : {}),
@@ -173,7 +230,7 @@ export class LocalStore {
     // Write the whole sealed plan before any question can be returned to a client.
     writeFileSync(path, JSON.stringify(lesson, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
     chmodSync(path, 0o400);
-    this.update({ ...this.data, lessons: [...this.data.lessons, lesson] });
+    this.update({ ...this.data, lessons: [...this.data.lessons, lesson], activeLessonId: lesson.id });
     return structuredClone(lesson);
   }
 
@@ -187,7 +244,7 @@ export class LocalStore {
     }
     const current = this.pendingQuestion();
     if (!current || current.id !== exerciseId) throw new AppError('This exercise is no longer current. Refresh to continue.', 409);
-    const lesson = this.data.lessons.at(-1)!;
+    const lesson = this.activeLesson()!;
     const attempt: Attempt = { id: randomUUID(), lessonId: lesson.id, exerciseId, answer,
       correct: answer === 'idk' ? null : answer === current.verdict, answeredAt: new Date().toISOString(), elapsedMs: Math.round(elapsedMs), flagged: false };
     this.update({ ...this.data, attempts: [...this.data.attempts, attempt] });
@@ -254,7 +311,7 @@ export class LocalStore {
   discussionContext(lessonId: string): DiscussionContext {
     const lesson = this.data.lessons.find(item => item.id === lessonId);
     if (!lesson) throw new AppError('Lesson not found.', 404);
-    if (lesson.id !== this.data.lessons.at(-1)?.id || this.pendingQuestion()) throw new AppError('Finish the current lesson before talking with your tutor.', 409);
+    if (lesson.id !== this.activeLesson()?.id || this.pendingQuestion()) throw new AppError('Finish the current lesson before talking with your tutor.', 409);
     if (this.data.settings.tutorMode !== 'reflective') throw new AppError('Choose reflective tutor mode to discuss your learning. Baseline mode keeps no learner history.', 409);
     const tutor = this.context();
     return structuredClone({ tutor, lesson,
@@ -293,7 +350,7 @@ export class LocalStore {
   }
 
   skipUnansweredDiscussions() {
-    const lessonId = this.data.lessons.at(-1)?.id;
+    const lessonId = this.activeLesson()?.id;
     const discussions = this.data.discussions ?? [];
     if (!discussions.some(item => item.lessonId === lessonId && item.questions.some(question => question.answer === null && !question.skipped))) return;
     this.update({ ...this.data, discussions: discussions.map(item => item.lessonId === lessonId ? {
@@ -306,10 +363,21 @@ export class LocalStore {
     const question = lesson.questions.find(item => item.id === attempt.exerciseId)!;
     const complete = this.data.attempts.filter(item => item.lessonId === lesson.id).length === lesson.questions.length;
     // Planning metadata may identify a future mirror and reveal its verdict.
+    const retro = this.data.skillRetrofits?.flatMap(item => item.questions).find(item => item.exerciseId === question.id && item.lessonId === lesson.id);
+    const ids = question.plan?.skillUses?.filter(use => use.role !== 'incidental').map(use => use.conceptId) ?? retro?.uses.filter(use => use.role !== 'incidental').map(use => use.conceptId) ?? question.plan?.conceptIds ?? [];
+    const relatedConcepts = [...new Set(ids)].map(id => this.concept(id)).filter((item): item is GuideConcept => Boolean(item)).slice(0, 4);
+    const afterPlan = (at: string) => Date.parse(at) >= Date.parse(lesson.createdAt) && Date.parse(at) <= Date.parse(attempt.answeredAt);
+    const opened = (this.data.guideEvents ?? []).filter(event => event.action === 'opened' && event.lessonId === lesson.id && afterPlan(event.at));
+    const practiced = this.data.lessons.filter(item => item.focus?.parentLessonId === lesson.id && this.data.attempts.some(answer => answer.lessonId === item.id && afterPlan(answer.answeredAt)));
+    const teachingBeforeAnswer = [...new Set([
+      ...opened.map(event => `Opened guide: ${this.concept(event.conceptId)?.name ?? event.conceptId}`),
+      ...practiced.map(item => `Focused practice: ${this.concept(item.focus!.conceptId)?.name ?? item.focus!.conceptId}`),
+    ])];
     const revision = this.data.presentationRevisions?.flatMap(item => item.questions).find(item => item.exerciseId === question.id);
     const displayed = revision ? revisedQuestion(question, revision) : question;
     const { plan: _plan, ...answeredQuestion } = displayed;
     return structuredClone({ attempt, question: complete ? displayed : answeredQuestion, lessonObjective: lesson.objective, provider: lesson.provider,
+      relatedConcepts, teachingBeforeAnswer,
       ...(revision ? { originalPresentation: { specification: question.specification, code: question.code, referenceCode: question.referenceCode } } : {}),
     });
   }
@@ -335,6 +403,10 @@ export class LocalStore {
       skillRetrofits: structuredClone((this.data.skillRetrofits ?? []).map(review => ({ ...review,
         questions: review.questions.filter(question => knownLessons.has(question.lessonId)),
       })).filter(review => review.questions.length)),
+      guideEvents: structuredClone((this.data.guideEvents ?? []).slice(-120)),
+      focusHistory: this.data.lessons.filter(item => item.focus).slice(-12).map(item => ({ lessonId: item.id, parentLessonId: item.focus!.parentLessonId,
+        conceptId: item.focus!.conceptId, answered: this.data.attempts.filter(attempt => attempt.lessonId === item.id).length,
+        total: item.questions.length, endedEarly: (this.data.endedFocusIds ?? []).includes(item.id) })),
       discussions: structuredClone(discussions),
       feedback: structuredClone((this.data.feedback ?? []).filter(item => knownLessons.has(item.lessonId))),
       reviewSessions: structuredClone((this.data.reviewSessions ?? []).filter(item => knownIds.has(item.attemptId))),
@@ -360,11 +432,13 @@ export class LocalStore {
         reflection: complete ? lesson.reflection : null, assumptions: complete ? lesson.assumptions : [],
         hypotheses: complete ? lesson.hypotheses : [], predictionHash: lesson.predictionHash,
         ...(complete && lesson.curriculum ? { curriculum: lesson.curriculum } : {}),
-        feedback: this.data.feedback?.find(item => item.lessonId === lesson.id) };
+        feedback: this.data.feedback?.find(item => item.lessonId === lesson.id), ...(lesson.focus ? { focus: lesson.focus } : {}),
+        ...((this.data.endedFocusIds ?? []).includes(lesson.id) ? { endedEarly: true } : {}) };
     });
     const current = this.pendingQuestion();
     return structuredClone({ settings: this.data.settings, providers, job,
-      currentLesson: summaries.at(-1) ?? null,
+      currentLesson: summaries.find(item => item.id === this.activeLesson()?.id) ?? null,
+      lessonPreview: this.previewConcepts(), guides: this.data.guides ?? [],
       question: current ? { id: current.id, title: current.title, specification: current.specification, code: current.code,
         purpose: current.purpose, testCount: current.validation.testCount } : null,
       lessons: [...summaries].reverse(), reviews: [...this.data.attempts].reverse().map(item => this.review(item)),

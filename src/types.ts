@@ -161,6 +161,26 @@ export interface Lesson extends Omit<ProposedLesson, 'questions'> {
   interests: string;
   questions: Exercise[];
   predictionHash: string;
+  focus?: { conceptId: string; parentLessonId: string };
+}
+export interface GuideConcept { id: string; name: string; description: string }
+export interface ConceptGuide {
+  conceptId: string;
+  version: string;
+  createdAt: string;
+  title: string;
+  description: string;
+  examples: { expression: string; result: JsonValue; explanation: string }[];
+  takeaway: string;
+  links: { title: string; url: string }[];
+}
+export interface GuideEvent {
+  id: string;
+  conceptId: string;
+  version: string | null;
+  lessonId: string | null;
+  at: string;
+  action: 'opened' | 'finished' | 'familiar' | 'unclear';
 }
 export interface Attempt {
   id: string;
@@ -225,6 +245,11 @@ export interface StoreData {
   discussions?: Discussion[];
   skillRetrofits?: SkillRetrofit[];
   presentationRevisions?: PresentationRevision[];
+  activeLessonId?: string;
+  startedLessonIds?: string[];
+  endedFocusIds?: string[];
+  guides?: ConceptGuide[];
+  guideEvents?: GuideEvent[];
 }
 export interface PresentationRevision {
   id: string;
@@ -257,6 +282,9 @@ export interface TutorContext {
   skillRetrofits?: SkillRetrofit[];
   repair?: string[];
   draft?: ProposedLesson;
+  focus?: { concept: GuideConcept; parentLessonId: string; avoidQuestions?: ProposedQuestion[] };
+  guideEvents?: GuideEvent[];
+  focusHistory?: { lessonId: string; parentLessonId: string; conceptId: string; answered: number; total: number; endedEarly: boolean }[];
 }
 export interface Job {
   id: string;
@@ -264,8 +292,9 @@ export interface Job {
   stage: string;
   startedAt: string;
   message: string;
-  kind?: 'lesson' | 'discussion';
+  kind?: 'lesson' | 'discussion' | 'guide' | 'focus';
   lessonId?: string;
+  conceptId?: string;
 }
 export interface CalibrationBin { label: string; count: number; predicted: number | null; actual: number | null }
 export interface Metrics {
@@ -289,6 +318,8 @@ export interface Review {
   lessonObjective: string;
   provider: ProviderId;
   originalPresentation?: Pick<Exercise, 'specification' | 'code' | 'referenceCode'>;
+  relatedConcepts?: GuideConcept[];
+  teachingBeforeAnswer?: string[];
 }
 export interface LessonSummary {
   id: string;
@@ -307,12 +338,16 @@ export interface LessonSummary {
   predictionHash: string;
   feedback?: LessonFeedback;
   curriculum?: CurriculumPlan;
+  focus?: Lesson['focus'];
+  endedEarly?: boolean;
 }
 export interface AppState {
   settings: Settings;
   providers: ProviderStatus[];
   job: Job | null;
   currentLesson: LessonSummary | null;
+  lessonPreview?: GuideConcept[];
+  guides?: ConceptGuide[];
   question: PublicQuestion | null;
   lessons: LessonSummary[];
   reviews: Review[];
