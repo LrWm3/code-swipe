@@ -18,7 +18,7 @@ export const DEFAULT_SETTINGS: Settings = { provider: 'codex', language: 'javasc
 export function parseSettings(input: unknown): Settings {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError('Choose valid tutor settings.');
   const data = input as Settings;
-  if (data.language !== undefined && !['javascript', 'python'].includes(data.language)) throw new AppError('Choose JavaScript or Python.');
+  if (data.language !== undefined && !['javascript', 'python', 'rust'].includes(data.language)) throw new AppError('Choose JavaScript, Python, or Rust.');
   if (!['codex', 'opencode', 'demo'].includes(data.provider)) throw new AppError('Choose Codex, OpenCode, or practice demo.');
   if (typeof data.model !== 'string' || data.model.length > 160 || !/^[\w./:-]*$/.test(data.model) || data.model.startsWith('-')) throw new AppError('Enter a model name, or leave it blank for the CLI default.');
   if (typeof data.interests !== 'string' || data.interests.length > 2000) throw new AppError('Keep interests under 2,000 characters.');
@@ -179,7 +179,7 @@ export class LocalStore {
   }
 
   recordGuideEvent(conceptId: string, action: GuideEvent['action'], language: Language = 'javascript'): void {
-    if (!['javascript', 'python'].includes(language)) throw new AppError('Choose a supported guide language.');
+    if (!['javascript', 'python', 'rust'].includes(language)) throw new AppError('Choose a supported guide language.');
     const guide = this.data.guides?.find(item => item.conceptId === conceptId && (item.language ?? 'javascript') === language);
     if (!guide || !['opened', 'finished', 'familiar', 'unclear'].includes(action)) throw new AppError('Open a prepared guide before recording an action.');
     const event: GuideEvent = { id: randomUUID(), conceptId, language, version: guide.version, lessonId: this.activeLesson()?.id ?? null, at: new Date().toISOString(), action };

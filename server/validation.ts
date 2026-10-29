@@ -7,6 +7,7 @@ import { mirrors, validateCurriculum } from './curriculum-validation.ts';
 import { questionSkills } from './skill-evidence.ts';
 import { validateArguments, validatePythonQuestionFormat, validateQuestionFormat, validateSignature } from './question-format.ts';
 import { executePython } from './python-runtime.ts';
+import { executeRustBatch, validateRustQuestionFormat } from './rust-runtime.ts';
 
 const MAX_PAYLOAD = 180_000;
 const MAX_VALUE = 16_000;
@@ -146,11 +147,12 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
     string(question.specification, `${path}.specification`, 2_000);
     string(question.code, `${path}.code`, 6_000);
     string(question.referenceCode, `${path}.referenceCode`, 6_000);
-    if (context.settings.language === 'python' && question.signature === undefined) reject(`${path}.signature`, 'is required for Python questions.');
+    if (['python', 'rust'].includes(context.settings.language ?? '') && question.signature === undefined) reject(`${path}.signature`, 'is required for Python and Rust questions.');
     if (question.signature !== undefined) {
       try {
         const formatted = question as unknown as { signature: FunctionSignature; code: string; referenceCode: string };
         if (context.settings.language === 'python') validatePythonQuestionFormat(formatted);
+        else if (context.settings.language === 'rust') validateRustQuestionFormat(formatted);
         else validateQuestionFormat(formatted);
       }
       catch (error) { reject(path, (error as Error).message); }
@@ -208,11 +210,11 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
         catch (error) { reject(testPath, (error as Error).message); }
       }
       checkJSON(test.expected, `${testPath}.expected`, MAX_VALUE);
-      if (context.settings.language === 'python') {
+      if (context.settings.language === 'python' || context.settings.language === 'rust') {
         const pending: unknown[] = [test.input, test.expected];
         while (pending.length) {
           const value = pending.pop();
-          if (typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)) reject(testPath, 'Python fixtures must use integers within the safe JSON range.');
+          if (typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)) reject(testPath, 'Fixtures must use integers within the safe JSON range.');
           if (value && typeof value === 'object') pending.push(...Object.values(value));
         }
       }
@@ -411,6 +413,28 @@ export async function validateLesson(proposal: unknown, context: TutorContext, s
   for (let i = 0; i < lesson.questions.length; i++) {
     const question = lesson.questions[i];
     const report: ValidationReport = { checkedAt: new Date().toISOString(), testCount: question.tests.length, passedCount: 0, failures: [] };
+    if (context.settings.language === 'rust') {
+      const inputs = question.tests.map(test => test.input);
+      const reference = await executeRustBatch(question.referenceCode, inputs, `questions[${i}].referenceCode`, signal, question.signature!);
+      for (let j = 0; j < question.tests.length; j++) {
+        if (reference[j].error !== null || canonical(reference[j].actual) !== canonical(question.tests[j].expected)) reject(`questions[${i}].tests[${j}]`, 'referenceCode does not produce the expected output; repair the reference or fixture before labelling the candidate.');
+      }
+      const actual = await executeRustBatch(question.code, inputs, `questions[${i}].code`, signal, question.signature!, question.verdict === 'buggy');
+      if (actual[0]?.compilationError) {
+        report.compilationError = actual[0].compilationError;
+        reports.push(report);
+        continue;
+      }
+      question.tests.forEach((fixture, j) => {
+        const observed = actual[j];
+        if (observed.error === null && canonical(observed.actual) === canonical(fixture.expected)) report.passedCount++;
+        else report.failures.push({ input: fixture.input, expected: fixture.expected, actual: observed.actual, error: observed.error });
+      });
+      if (question.verdict === 'correct' && report.failures.length) reject(`questions[${i}].verdict`, `labelled correct but failed ${report.failures.length}/${report.testCount} fixtures; repair code or label.`);
+      if (question.verdict === 'buggy' && !report.failures.length) reject(`questions[${i}].verdict`, 'labelled buggy but passed every fixture; provide a concrete counterexample or label correct.');
+      reports.push(report);
+      continue;
+    }
     const checkFixture = async (j: number) => {
       const fixture = question.tests[j];
       const run = (code: string, path: string) => context.settings.language === 'python'

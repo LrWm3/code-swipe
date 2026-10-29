@@ -1,5 +1,5 @@
 export type ProviderId = 'codex' | 'opencode' | 'demo';
-export type Language = 'javascript' | 'python';
+export type Language = 'javascript' | 'python' | 'rust';
 export type Verdict = 'buggy' | 'correct';
 export type Answer = Verdict | 'idk';
 export const PURPOSES = ['diagnostic', 'practice', 'transfer', 'retention', 'introduction', 'frontier', 'robustness', 'calibration', 'strategy-evaluation'] as const;
@@ -154,6 +154,7 @@ export interface ValidationReport {
   testCount: number;
   passedCount: number;
   failures: { input: JsonValue; expected: JsonValue; actual: JsonValue | null; error: string | null }[];
+  compilationError?: string;
 }
 export interface Exercise extends ProposedQuestion { id: string; validation: ValidationReport }
 export interface Lesson extends Omit<ProposedLesson, 'questions'> {
@@ -177,7 +178,7 @@ export interface ConceptGuide {
   createdAt: string;
   title: string;
   description: string;
-  examples: { expression: string; mode?: 'expression' | 'statements'; result: JsonValue; explanation: string }[];
+  examples: { expression: string; mode?: 'expression' | 'statements'; result: JsonValue; explanation: string; rustType?: string }[];
   takeaway: string;
   links: { title: string; url: string }[];
 }

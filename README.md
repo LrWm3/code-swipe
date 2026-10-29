@@ -1,6 +1,6 @@
 # Code Swipe — local tutor lab
 
-Read a little JavaScript or Python. Swipe right for correct, left for buggy, or choose IDK. Keep playing, and open an explanation whenever you want one.
+Read a little JavaScript, Python, or Rust. Swipe right for correct, left for buggy, or choose IDK. Keep playing, and open an explanation whenever you want one.
 
 This branch rebuilds Code Swipe around a single teaching agent, powered by your installed **Codex** or **OpenCode** CLI. It keeps a notebook of tentative learner hypotheses, plans short lessons, and commits its predictions *before* you answer. Your answers shape the next lesson. No account system, Firebase, subjects, Elo, or mastery tree.
 
@@ -13,7 +13,7 @@ npm ci
 npm run dev
 ```
 
-Open **http://127.0.0.1:3000**. Click **Try practice demo** for an instant, offline walkthrough, or use your signed-in CLI:
+Open **http://127.0.0.1:3000**. Click **Try practice demo** for a local walkthrough, or use your signed-in CLI:
 
 ```sh
 codex login
@@ -21,13 +21,14 @@ codex login
 opencode auth login
 ```
 
-JavaScript runs in the app’s built-in sandbox. For Python, install and start Docker, then download the pinned sandbox image once:
+JavaScript runs in the app’s built-in sandbox. For Python or Rust, install and start Docker, then download the appropriate pinned sandbox image once:
 
 ```sh
 docker pull python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
+docker pull rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7d6e9f0578bba4cfa285bfa37fe6
 ```
 
-Restart the server after preparing the image. Setup shows whether the Python sandbox is available; the app never falls back to running Python directly on your machine.
+Restart the server after preparing an image. Setup shows whether each sandbox is available; the app never falls back to running generated Python or Rust directly on your machine.
 
 Choose your provider and language in **Setup**, add any interests, and start a lesson. Language changes apply to the next lesson; existing questions keep their language, and focused practice uses the guide’s language. Leave the model blank for the CLI default, or enter a Codex model name / OpenCode `provider/model` identifier. Restart the server after installing a missing CLI. Codex requires **0.153.4 or newer** for this app's isolation options; OpenCode was tested with 1.17.13. Setup shows the version found by the server. If it differs from your terminal's version, set `CODE_SWIPE_CODEX_BIN` in `.env` to the supported executable's absolute path.
 
@@ -45,7 +46,7 @@ The demo uses curated examples and neutral predictions. It is not adaptive. For 
 - Gives each question educational and investigative objectives, with multiple purposes such as practice, transfer, retention, frontier exploration, or checking a teaching strategy. Lessons record their mix, progression, cognitive demand, and scaffolding; planning checks reject missing or inconsistent annotations.
 - Builds durable concept evidence from the lesson archive, including familiarity, uncertainty, prerequisites, representations, and deferred variants. Each lesson includes at most one closely related pair for a new concept; other counterparts stay deferred or unasked with a reason.
 - Distinguishes skills directly targeted, exercised inside a harder task, and merely present. Meaningful embedded practice can keep older skills in use without repeating their original questions. Each card commits what success or failure could indicate for each skill. Supported scaffolded successes contribute evidence while retaining the context of the help provided; they do not establish independent competence.
-- Runs each reference solution and candidate against generated fixtures in an isolated, resource-limited sandbox: QuickJS for JavaScript and a disposable Docker container for Python. Failed batches get up to three repair attempts before being rejected.
+- Runs each reference solution and candidate against generated fixtures in an isolated, resource-limited sandbox: QuickJS for JavaScript and disposable Docker containers for Python and Rust. Rust ownership, borrow, and type errors can also produce compiler-checked buggy cards. Failed batches get up to three repair attempts before being rejected.
 - Saves immutable plan artifacts before showing a question. Answers append to local history; retries do not duplicate them.
 - Records review openings and estimated active viewing time, so the tutor can account for explanations you chose to inspect. Background or unfocused time is paused.
 - Supports optional conversations after a lesson. Each **Send to tutor** or **Update tutor** requests one bounded response from your selected CLI; the next lesson considers saved feedback and replies.
@@ -58,7 +59,7 @@ Existing lessons remain readable without curriculum annotations. Newly generated
 
 Skill memory keeps the last targeted encounter, last meaningful exercise, and last independent supporting answer separately. Raw right/wrong counts still describe whole-card judgments, not successes or failures on every component. The tutor uses the evidence and its uncertainty to choose embedded practice or focused checks; there is no automatic forgetting timer. Skill roles and interpretations are model judgments, not proof of the learner's reasoning. An old prerequisite is not credited merely because it appears in a dependency chain.
 
-Exercises are currently **pure, synchronous JavaScript or Python functions** using JSON-compatible inputs and outputs. Descriptive function names and natural parameter lists are used in both languages. JavaScript uses multiline JSDoc; Python uses multiline docstrings and may include type hints. Constraints belong in the documentation while the task description focuses on behavior. Python currently supports the `math`, `typing`, `collections`, `itertools`, `functools`, and `re` standard-library modules; third-party packages, I/O, classes, generators, and asynchronous functions are outside this first version. Tests are finite checks, not proofs: a generated specification, reference solution, or fixture can still be wrong. The flag button exists for that reason.
+Exercises are currently **pure, synchronous JavaScript, Python, or Rust functions** using JSON-compatible test data. Descriptive function names and natural parameter lists are used in each language. JavaScript uses multiline JSDoc, Python uses multiline docstrings, and Rust uses `///` documentation and explicit types. Python supports selected standard-library modules. Rust supports common scalar types, strings, vectors, slices, `Option`, `Result`, and string-keyed hash maps, including borrowed inputs; custom structs, mutable references, and third-party dependencies are outside this first version. Tests are finite checks, not proofs: a generated specification, reference solution, or fixture can still be wrong. The flag button exists for that reason.
 
 Before a lesson that may introduce new concepts, an optional preview links to short concept guides. You can skip straight to the cards, read a guide, or request four or six focused practice cards before returning to the main lesson. You can also open related guides from an answer review. Focused practice can be left early; any answers already given are saved. Guides use reviewed examples for a few common concepts and generate others on demand with your selected tutor. Guides and reference links are specific to their language, and examples, including multiline snippets, are checked in that language’s sandbox. Checking examples cannot guarantee the guide's explanation is correct.
 

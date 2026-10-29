@@ -4,21 +4,23 @@ import { AppError, LocalStore, parseSettings } from './store.ts';
 import { detectProviders, generateLesson, generateDiscussion, generateGuide } from './providers.ts';
 import { createDemoLesson } from './demo.ts';
 import { createPythonDemoLesson } from './python-demo.ts';
+import { createRustDemoLesson } from './rust-demo.ts';
 import { validateLesson } from './validation.ts';
 import { reviewedGuide } from './concept-guides.ts';
 import { pythonAvailability } from './python-runtime.ts';
+import { rustAvailability } from './rust-runtime.ts';
 
 export class TutorService {
   job: Job | null = null;
   private controller: AbortController | null = null;
   private work: Promise<void> = Promise.resolve();
   constructor(readonly store: LocalStore, readonly providers: ProviderStatus[], private generate = generateLesson, private discussWithTutor = generateDiscussion,
-    readonly languages: NonNullable<AppState['languages']> = [{ id: 'javascript', available: true, detail: 'JavaScript sandbox ready.' }, { id: 'python', available: true, detail: 'Python sandbox availability has not been checked.' }]) {}
+    readonly languages: NonNullable<AppState['languages']> = [{ id: 'javascript', available: true, detail: 'JavaScript sandbox ready.' }, { id: 'python', available: true, detail: 'Python sandbox availability has not been checked.' }, { id: 'rust', available: true, detail: 'Rust sandbox availability has not been checked.' }]) {}
 
   static async create(directory: string) {
-    const [providers, python] = await Promise.all([detectProviders(), pythonAvailability()]);
+    const [providers, python, rust] = await Promise.all([detectProviders(), pythonAvailability(), rustAvailability()]);
     return new TutorService(new LocalStore(directory), providers, undefined, undefined,
-      [{ id: 'javascript', available: true, detail: 'JavaScript sandbox ready.' }, { id: 'python', ...python }]);
+      [{ id: 'javascript', available: true, detail: 'JavaScript sandbox ready.' }, { id: 'python', ...python }, { id: 'rust', ...rust }]);
   }
   state() { return this.store.publicState(this.providers, this.job, this.languages); }
   saveSettings(value: unknown) {
@@ -32,8 +34,8 @@ export class TutorService {
     this.requireIdle();
     const parent = this.store.activeLesson();
     const concept = focusRequest ? this.store.concept(focusRequest.conceptId) : null;
-    if (focusRequest && (!concept || !parent || parent.focus || ![4, 6].includes(focusRequest.length) || (focusRequest.language !== undefined && !['javascript', 'python'].includes(focusRequest.language)))) throw new AppError('Choose a concept and 4 or 6 cards while a main lesson is open.', 400);
-    if (focusRequest && this.store.snapshot().settings.provider === 'demo' && !['demo-code-review', 'python-demo-code-review'].includes(concept?.id ?? '')) throw new AppError('Choose Codex or OpenCode in Setup to generate focused practice for this concept.');
+    if (focusRequest && (!concept || !parent || parent.focus || ![4, 6].includes(focusRequest.length) || (focusRequest.language !== undefined && !['javascript', 'python', 'rust'].includes(focusRequest.language)))) throw new AppError('Choose a concept and 4 or 6 cards while a main lesson is open.', 400);
+    if (focusRequest && this.store.snapshot().settings.provider === 'demo' && !['demo-code-review', 'python-demo-code-review', 'rust-demo-code-review'].includes(concept?.id ?? '')) throw new AppError('Choose Codex or OpenCode in Setup to generate focused practice for this concept.');
     if (!focusRequest && this.store.pendingQuestion()) throw new AppError('Finish the current lesson before planning another.', 409);
     let context = this.store.context();
     if (!this.providers.some(item => item.id === context.settings.provider && item.available)) {
@@ -66,9 +68,9 @@ export class TutorService {
         const earlierFailures: string[] = [];
         for (let attempt = 0; attempt <= maxRepairs; attempt++) {
           const repairMessage = `A check failed. Asking the tutor to repair the lesson (${attempt} of ${maxRepairs})…`;
-          const proposal = context.settings.provider === 'demo' ? (context.settings.language === 'python' ? createPythonDemoLesson(context) : createDemoLesson(context)) : await this.generate(context, { signal: controller.signal, onProgress: message => progress(attempt ? repairMessage : message, attempt ? 'repairing' : 'planning') });
+          const proposal = context.settings.provider === 'demo' ? (context.settings.language === 'rust' ? createRustDemoLesson(context) : context.settings.language === 'python' ? createPythonDemoLesson(context) : createDemoLesson(context)) : await this.generate(context, { signal: controller.signal, onProgress: message => progress(attempt ? repairMessage : message, attempt ? 'repairing' : 'planning') });
           if (!active()) return;
-          progress(`Running every fixture in the isolated ${language === 'python' ? 'Python' : 'JavaScript'} sandbox…`, 'validating');
+          progress(`Running every fixture in the isolated ${language === 'python' ? 'Python' : language === 'rust' ? 'Rust' : 'JavaScript'} sandbox…`, 'validating');
           let validated: Awaited<ReturnType<typeof validateLesson>>;
           try { validated = await validateLesson(proposal, context, controller.signal); }
           catch (error) {
@@ -96,7 +98,7 @@ export class TutorService {
   }
   prepareGuide(conceptId: string, language: Language = 'javascript') {
     this.requireIdle();
-    if (!['javascript', 'python'].includes(language)) throw new AppError('Choose a supported guide language.');
+    if (!['javascript', 'python', 'rust'].includes(language)) throw new AppError('Choose a supported guide language.');
     const concept = this.store.concept(conceptId);
     if (!concept) throw new AppError('Concept not found.', 404);
     if (this.store.snapshot().guides?.some(item => item.conceptId === conceptId && (item.language ?? 'javascript') === language)) return;

@@ -130,6 +130,7 @@ kbd { font-family: var(--mono); opacity: .65; font-size: .83rem; margin-left: 3p
 .review-section .fine-print { font-size: .73rem; }
 .test-list { display: flex; flex-direction: column; gap: 11px; margin-top: 15px; }
 .test-case { background: #10161e; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+.compiler-error { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border: 1px solid #f8514950; border-radius: 7px; color: #ffa198; font: .75rem/1.6 var(--mono); }
 .test-case.failed { border-color: #f8514950; }
 .test-heading { padding: 11px 13px; border-bottom: 1px solid #30363d; display: flex; justify-content: space-between; gap: 14px; }
 .test-heading > span { display: flex; align-items: center; gap: 6px; color: #7ee787; font-family: var(--mono); font-size: .65rem; }

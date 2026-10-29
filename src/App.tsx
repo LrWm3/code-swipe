@@ -4,13 +4,16 @@ import { ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, Code2, Downloa
 import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
 import python from 'highlight.js/lib/languages/python';
+import rust from 'highlight.js/lib/languages/rust';
 import type { Answer, AppState, CurriculumPlan, Discussion, GuideConcept, ConceptGuide, GuideEvent, Hypothesis, Job, JsonValue, Language, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
 import { flushReviewSessions, useAnswerClock, useReviewSync, useReviewTiming } from './ui';
 import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from './lesson-sizes';
+import { rustCall, rustDisplay, rustResult } from './rust-display';
 
 hljs.registerLanguage('javascript', javascript);
 hljs.registerLanguage('python', python);
-const LANGUAGE_NAMES: Record<Language, string> = { javascript: 'JavaScript', python: 'Python' };
+hljs.registerLanguage('rust', rust);
+const LANGUAGE_NAMES: Record<Language, string> = { javascript: 'JavaScript', python: 'Python', rust: 'Rust' };
 const PROVIDER_NAMES: Record<ProviderId, string> = { codex: 'Codex', opencode: 'OpenCode', demo: 'Practice demo' };
 const defaults: Settings = { provider: 'demo', language: 'javascript', model: '', interests: '', batchSize: DEFAULT_LESSON_SIZE, tutorMode: 'reflective' };
 const percent = (value: number | null) => value === null ? '—' : `${Math.round(value * 100)}%`;
@@ -105,12 +108,16 @@ function ReviewPanel({ review, pending, onFlag, onGuide }: { review: Review; pen
   }));
   const failures = checks.filter((check) => check.failure);
   const passing = checks.filter((check) => !check.failure);
-  const renderCheck = ({ test, index, failure }: typeof checks[number]) => (
-    <div className={`test-case ${failure ? 'failed' : ''}`} key={index}>
+  const renderCheck = ({ test, index, failure }: typeof checks[number]) => {
+    const call = review.language === 'rust' ? rustCall(question, test.input) : null;
+    const rust = review.language === 'rust';
+    const expected = rust ? rustResult(question, test.expected) : json(test.expected);
+    const actual = failure?.error || (rust ? rustResult(question, failure ? failure.actual : test.expected) : json(failure ? failure.actual : test.expected));
+    return <div className={`test-case ${failure ? 'failed' : ''}`} key={index}>
       <div className="test-heading"><span>{failure ? <X size={15} /> : <Check size={15} />} Check {index + 1}{failure ? ' · counterexample' : ' · passed'}</span>{test.note && <small>{test.note}</small>}</div>
-      <dl><div><dt>{question.signature ? 'Call' : 'Input'}</dt><dd><code>{question.signature ? `${question.signature.name}(${(test.input as JsonValue[]).map(value => review.language === 'python' ? pythonLiteral(value) : JSON.stringify(value)).join(', ')})` : json(test.input)}</code></dd></div><div><dt>Expected</dt><dd><code>{json(test.expected)}</code></dd></div><div><dt>Actual</dt><dd><code>{failure ? (failure.error || json(failure.actual)) : json(test.expected)}</code></dd></div></dl>
+      <dl><div><dt>{rust && !call ? 'Arguments' : question.signature ? 'Call' : 'Input'}</dt><dd><code>{rust ? (call ?? json(test.input)) : question.signature ? `${question.signature.name}(${(test.input as JsonValue[]).map(value => review.language === 'python' ? pythonLiteral(value) : JSON.stringify(value)).join(', ')})` : json(test.input)}</code></dd></div><div><dt>Expected</dt><dd><code>{expected}</code></dd></div><div><dt>Actual</dt><dd><code>{actual}</code></dd></div></dl>
     </div>
-  );
+  };
   return <div className="review-content" data-testid="answer-review">
     <div className={`result-banner ${attempt.correct === null ? 'neutral' : attempt.correct ? 'positive' : 'negative'}`} role="status">
       {attempt.correct === null ? <HelpCircle size={23} /> : attempt.correct ? <CheckCircle2 size={23} /> : <X size={23} />}
@@ -119,12 +126,12 @@ function ReviewPanel({ review, pending, onFlag, onGuide }: { review: Review; pen
     </div>
     <div className="review-section"><h3>Why {question.verdict}?</h3><p>{question.explanation}</p></div>
     {Boolean(review.relatedConcepts?.length) && <div className="review-section"><h3>Related concepts</h3><div className="concept-links">{review.relatedConcepts!.map(concept => <button className="button compact quiet" key={concept.id} onClick={() => onGuide(concept)} data-testid="review-concept">{concept.name}<ChevronRight size={14} /></button>)}</div></div>}
-    <div className="review-section"><h3>Test evidence</h3><p className="fine-print">{question.validation.passedCount} of {question.validation.testCount} checks passed for this implementation. Tests support this verdict; they do not prove correctness for every possible input.</p>
+    <div className="review-section"><h3>Test evidence</h3>{question.validation.compilationError ? <><p>This implementation did not compile, so its test cases could not run. The reference implementation passed its checks.</p><pre className="compiler-error">{question.validation.compilationError}</pre></> : <><p className="fine-print">{question.validation.passedCount} of {question.validation.testCount} checks passed for this implementation. Tests support this verdict; they do not prove correctness for every possible input.</p>
       {failures.length > 0 && <div className="test-list">{failures.map(renderCheck)}</div>}
       {passing.length > 0 && <details className="plain-details passing-checks" data-testid="passing-checks">
         <summary>Inspect {passing.length} passing {passing.length === 1 ? 'check' : 'checks'}</summary>
         <div className="test-list">{passing.map(renderCheck)}</div>
-      </details>}
+      </details>}</>}
     </div>
     {review.originalPresentation && <div className="review-section">
       <p className="fine-print">Names, documentation, and wording updated. Your answer was graded against the original version.</p>
@@ -295,7 +302,10 @@ function GuideDialog({ concept, language, guide, job, pending, error, canPractic
         {working && <div className="job-stage" role="status"><LoaderCircle size={20} className="spin" /><p>{job?.message}</p><button className="button compact quiet" onClick={onCancel}>Cancel</button></div>}
         {!guide && !working && <div><p className="muted">{concept.description}</p><button className="button quiet" onClick={onRetry} disabled={pending}>Prepare guide</button></div>}
         {guide && <><p className="guide-description">{guide.description}</p>
-          <div className="guide-examples">{guide.examples.map((example, index) => <div className="guide-example" key={index}><Code language={language} code={example.mode === 'statements' ? example.expression : `${example.expression} ${language === 'python' ? '#' : '//'} ${language === 'python' ? pythonLiteral(example.result) : JSON.stringify(example.result)}`} />{example.mode === 'statements' && <div className="guide-result"><strong>Result:</strong> <code>{language === 'python' ? pythonLiteral(example.result) : JSON.stringify(example.result)}</code></div>}<p>{example.explanation}</p></div>)}</div>
+          <div className="guide-examples">{guide.examples.map((example, index) => {
+            const result = language === 'python' ? pythonLiteral(example.result) : language === 'rust' ? rustDisplay(example.result, example.rustType) : JSON.stringify(example.result);
+            return <div className="guide-example" key={index}><Code language={language} code={example.mode === 'statements' ? example.expression : `${example.expression} ${language === 'python' ? '#' : '//'} ${result}`} />{example.mode === 'statements' && <div className="guide-result"><strong>Result:</strong> <code>{result}</code></div>}<p>{example.explanation}</p></div>;
+          })}</div>
           <p className="guide-takeaway"><strong>Keep in mind:</strong> {guide.takeaway}</p>
           {guide.links.length > 0 && <div className="review-section"><h3>More reading</h3>{guide.links.map(link => <a className="guide-link" key={link.url} href={link.url} target="_blank" rel="noopener noreferrer">{link.title} ↗</a>)}</div>}
           <div className="review-section"><h3>How does this feel?</h3><p className="fine-print">Optional. Your response helps the tutor plan; it isn’t a grade.</p><div className="concept-links"><button className="button compact quiet" disabled={pending} onClick={() => { setReport('familiar'); onReport('familiar'); }} aria-pressed={report === 'familiar'}>I know this</button><button className="button compact quiet" disabled={pending} onClick={() => { setReport('unclear'); onReport('unclear'); }} aria-pressed={report === 'unclear'}>Still unclear</button></div></div>
@@ -387,7 +397,7 @@ function SettingsPanel({ state, settings, setSettings, onSave, pending }: { stat
     <label htmlFor="provider">Tutor provider</label><select id="provider" data-testid="provider-select" value={settings.provider} onChange={(event) => setSettings({ ...settings, provider: event.target.value as ProviderId })}><option value="codex">Codex</option><option value="opencode">OpenCode</option><option value="demo">Practice demo · no agent needed</option></select>
     <div className="provider-status" role="status"><span className={`status-dot ${selected?.available ? '' : 'offline'}`} /><div><strong>{settings.provider === 'demo' ? 'Ready to try' : selected?.available ? 'Installed · login separately' : 'Not detected'}</strong><p>{selected?.detail || 'Provider information unavailable.'}</p>{selected?.version && <code>{selected.version}</code>}</div></div>
     {settings.provider !== 'demo' && <><label htmlFor="model">Model <span className="label-note">optional</span></label><input id="model" value={settings.model} placeholder="Use the agent’s default model" onChange={(event) => setSettings({ ...settings, model: event.target.value })} /><p className="field-help">Use a model name your selected agent supports. Authenticate in its CLI before starting a lesson.</p></>}
-    <label htmlFor="language">Programming language</label><select id="language" data-testid="language-select" value={settings.language ?? 'javascript'} onChange={event => setSettings({ ...settings, language: event.target.value as Language })}><option value="javascript">JavaScript</option><option value="python">Python</option></select>
+    <label htmlFor="language">Programming language</label><select id="language" data-testid="language-select" value={settings.language ?? 'javascript'} onChange={event => setSettings({ ...settings, language: event.target.value as Language })}><option value="javascript">JavaScript</option><option value="python">Python</option><option value="rust">Rust</option></select>
     {languageStatus && <p className="field-help" role="status">{languageStatus.detail}</p>}
     <label htmlFor="interests">What would you like to get better at?</label><textarea id="interests" data-testid="interests-input" rows={4} value={settings.interests} onChange={(event) => setSettings({ ...settings, interests: event.target.value })} placeholder="For example: JavaScript array logic, edge cases in data pipelines, and code I might see in interviews." /><p className="field-help">Plain language is enough. Lessons use small, executable functions in your selected language.</p>
     <fieldset><legend>Cards per lesson</legend><div className="segmented">{LESSON_SIZES.map((size) => <button key={size} type="button" className={settings.batchSize === size ? 'selected' : ''} onClick={() => setSettings({ ...settings, batchSize: size })} aria-pressed={settings.batchSize === size}>{size} cards</button>)}</div></fieldset>
@@ -672,6 +682,6 @@ export default function App() {
       </div>}
     </div>
     {review && <ReviewDialog key={review.attempt.id} review={review} pending={Boolean(pending) || running} error={error || connectionError} onFlag={flag} onGuide={concept => openGuide(concept, review.language ?? 'javascript')} onClose={() => setReviewId(null)} />}
-    {guideConcept && <GuideDialog key={guideToken} concept={guideConcept} language={guideLanguage} guide={guide} job={state?.job ?? null} pending={Boolean(pending)} error={error || connectionError} canPractice={Boolean(state?.currentLesson && !state.currentLesson.focus) && (state?.settings.provider !== 'demo' || ['demo-code-review', 'python-demo-code-review'].includes(guideConcept.id))} onClose={closeGuide} onDone={() => guideEvent('finished', true)} onReport={action => guideEvent(action)} onPractice={focusPractice} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onRetry={() => void mutate('guide', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/guide`, 'POST', { language: guideLanguage })))} />}
+    {guideConcept && <GuideDialog key={guideToken} concept={guideConcept} language={guideLanguage} guide={guide} job={state?.job ?? null} pending={Boolean(pending)} error={error || connectionError} canPractice={Boolean(state?.currentLesson && !state.currentLesson.focus) && (state?.settings.provider !== 'demo' || ['demo-code-review', 'python-demo-code-review', 'rust-demo-code-review'].includes(guideConcept.id))} onClose={closeGuide} onDone={() => guideEvent('finished', true)} onReport={action => guideEvent(action)} onPractice={focusPractice} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onRetry={() => void mutate('guide', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/guide`, 'POST', { language: guideLanguage })))} />}
   </div>;
 }

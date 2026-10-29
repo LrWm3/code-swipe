@@ -125,7 +125,7 @@ function codeTokens(source: string, entryName: string): string[] {
   }
   return (source.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*|[$\w]+|===|!==|=>|==|!=|<=|>=|\+\+|--|&&|\|\||\?\?|\*\*|[^\s]/g) ?? [])
     .filter(token => !token.startsWith('//') && !token.startsWith('/*'))
-    .map((token, index, tokens) => token === entryName && tokens[index - 1] === 'function' ? '$entry' : token);
+    .map((token, index, tokens) => token === entryName && ['function', 'fn'].includes(tokens[index - 1]) ? '$entry' : token);
 }
 
 function overlap(left: string[], right: string[]): number {
