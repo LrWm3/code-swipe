@@ -368,3 +368,4 @@ td { color: #b1bac4; }
 .guide-link { color: var(--blue); display: block; margin-top: 8px; }
 .concept-links [aria-pressed="true"] { border-color: var(--blue); color: var(--blue); }
 .focus-exit { margin-top: 10px; }
+.settings-form .field-help { overflow-wrap: anywhere; }

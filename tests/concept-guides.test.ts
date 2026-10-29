@@ -98,7 +98,7 @@ test('given an unfinished focused lesson, when leaving practice, then completed 
   assert.equal(reopened.snapshot().attempts.length, 1);
   assert.deepEqual(reopened.snapshot().endedFocusIds, [focus.id]);
   assert.equal(reopened.publicState(available, null).lessons.find(item => item.id === focus.id)?.endedEarly, true);
-  assert.deepEqual(reopened.context().focusHistory?.at(-1), { lessonId: focus.id, parentLessonId: parent.id, conceptId: 'demo-code-review', answered: 1, total: 4, endedEarly: true });
+  assert.deepEqual(reopened.context().focusHistory?.at(-1), { lessonId: focus.id, parentLessonId: parent.id, conceptId: 'demo-code-review', language: 'javascript', answered: 1, total: 4, endedEarly: true });
 });
 
 test('given an unanswered parent question, when a focused practice question duplicates it, then the mini-lesson is rejected', async t => {

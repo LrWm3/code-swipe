@@ -8,22 +8,23 @@ import { PURPOSES } from '../src/types.ts';
 import { buildCurriculumMemory } from './curriculum-memory.ts';
 import { validateRetrofit } from './skill-evidence.ts';
 import { presentationArchiveHash, revisedQuestion, validatePresentationRevision, verifyPresentationBehavior } from './presentation-revisions.ts';
-import type { ConceptGuide, GuideConcept, GuideEvent, PresentationRevision, SkillRetrofit } from '../src/types.ts';
+import type { ConceptGuide, GuideConcept, GuideEvent, Language, PresentationRevision, SkillRetrofit } from '../src/types.ts';
 
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
-export const DEFAULT_SETTINGS: Settings = { provider: 'codex', model: '', interests: '', batchSize: DEFAULT_LESSON_SIZE, tutorMode: 'reflective' };
+export const DEFAULT_SETTINGS: Settings = { provider: 'codex', language: 'javascript', model: '', interests: '', batchSize: DEFAULT_LESSON_SIZE, tutorMode: 'reflective' };
 
 export function parseSettings(input: unknown): Settings {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError('Choose valid tutor settings.');
   const data = input as Settings;
+  if (data.language !== undefined && !['javascript', 'python'].includes(data.language)) throw new AppError('Choose JavaScript or Python.');
   if (!['codex', 'opencode', 'demo'].includes(data.provider)) throw new AppError('Choose Codex, OpenCode, or practice demo.');
   if (typeof data.model !== 'string' || data.model.length > 160 || !/^[\w./:-]*$/.test(data.model) || data.model.startsWith('-')) throw new AppError('Enter a model name, or leave it blank for the CLI default.');
   if (typeof data.interests !== 'string' || data.interests.length > 2000) throw new AppError('Keep interests under 2,000 characters.');
   if (!LESSON_SIZES.some(size => size === data.batchSize)) throw new AppError('Choose 6, 8, or 12 exercises per lesson.');
   if (!['reflective', 'baseline'].includes(data.tutorMode)) throw new AppError('Choose reflective or baseline tutor mode.');
-  return { provider: data.provider, model: data.model, interests: data.interests.trim(), batchSize: data.batchSize, tutorMode: data.tutorMode };
+  return { provider: data.provider, language: data.language ?? 'javascript', model: data.model, interests: data.interests.trim(), batchSize: data.batchSize, tutorMode: data.tutorMode };
 }
 
 export function lessonHash(lesson: Lesson): string {
@@ -31,10 +32,10 @@ export function lessonHash(lesson: Lesson): string {
   return createHash('sha256').update(JSON.stringify(sealed)).digest('hex');
 }
 
-export function calculateMetrics(data: StoreData, filter?: Pick<Settings, 'provider' | 'tutorMode'>): Metrics {
+export function calculateMetrics(data: StoreData, filter?: Pick<Settings, 'provider' | 'tutorMode' | 'language'>): Metrics {
   const observations = data.attempts.filter(attempt => !attempt.flagged && attempt.answer !== 'idk' && typeof attempt.correct === 'boolean').flatMap(attempt => {
     const lesson = data.lessons.find(item => item.id === attempt.lessonId);
-    if (!lesson || (filter && (lesson.provider !== filter.provider || lesson.tutorMode !== filter.tutorMode))) return [];
+    if (!lesson || (filter && (lesson.provider !== filter.provider || lesson.tutorMode !== filter.tutorMode || (lesson.language ?? 'javascript') !== (filter.language ?? 'javascript')))) return [];
     const question = lesson.questions.find(item => item.id === attempt.exerciseId);
     return question ? [{ p: question.prediction.pCorrect, y: Number(attempt.correct), purposes: question.plan?.purposes ?? [question.purpose] }] : [];
   });
@@ -174,13 +175,14 @@ export class LocalStore {
 
   saveGuide(guide: ConceptGuide): void {
     if (!this.concept(guide.conceptId)) throw new AppError('Concept not found.', 404);
-    this.update({ ...this.data, guides: [...(this.data.guides ?? []).filter(item => item.conceptId !== guide.conceptId), structuredClone(guide)] });
+    this.update({ ...this.data, guides: [...(this.data.guides ?? []).filter(item => item.conceptId !== guide.conceptId || (item.language ?? 'javascript') !== (guide.language ?? 'javascript')), structuredClone(guide)] });
   }
 
-  recordGuideEvent(conceptId: string, action: GuideEvent['action']): void {
-    const guide = this.data.guides?.find(item => item.conceptId === conceptId);
+  recordGuideEvent(conceptId: string, action: GuideEvent['action'], language: Language = 'javascript'): void {
+    if (!['javascript', 'python'].includes(language)) throw new AppError('Choose a supported guide language.');
+    const guide = this.data.guides?.find(item => item.conceptId === conceptId && (item.language ?? 'javascript') === language);
     if (!guide || !['opened', 'finished', 'familiar', 'unclear'].includes(action)) throw new AppError('Open a prepared guide before recording an action.');
-    const event: GuideEvent = { id: randomUUID(), conceptId, version: guide.version, lessonId: this.activeLesson()?.id ?? null, at: new Date().toISOString(), action };
+    const event: GuideEvent = { id: randomUUID(), conceptId, language, version: guide.version, lessonId: this.activeLesson()?.id ?? null, at: new Date().toISOString(), action };
     this.update({ ...this.data, guideEvents: [...this.data.guideEvents ?? [], event] });
   }
 
@@ -217,7 +219,7 @@ export class LocalStore {
     proposal = structuredClone(proposal);
     const lesson: Lesson = {
       id: randomUUID(), createdAt: new Date().toISOString(), provider: settings.provider, model: settings.model,
-      tutorMode: settings.tutorMode, interests: settings.interests,
+      tutorMode: settings.tutorMode, interests: settings.interests, language: settings.language ?? 'javascript',
       ...(focus ? { focus } : {}),
       objective: proposal.objective, rationale: proposal.rationale, assumptions: proposal.assumptions,
       reflection: proposal.reflection, hypotheses: proposal.hypotheses,
@@ -376,7 +378,7 @@ export class LocalStore {
     const revision = this.data.presentationRevisions?.flatMap(item => item.questions).find(item => item.exerciseId === question.id);
     const displayed = revision ? revisedQuestion(question, revision) : question;
     const { plan: _plan, ...answeredQuestion } = displayed;
-    return structuredClone({ attempt, question: complete ? displayed : answeredQuestion, lessonObjective: lesson.objective, provider: lesson.provider,
+    return structuredClone({ attempt, question: complete ? displayed : answeredQuestion, lessonObjective: lesson.objective, provider: lesson.provider, language: lesson.language ?? 'javascript',
       relatedConcepts, teachingBeforeAnswer,
       ...(revision ? { originalPresentation: { specification: question.specification, code: question.code, referenceCode: question.referenceCode } } : {}),
     });
@@ -403,9 +405,9 @@ export class LocalStore {
       skillRetrofits: structuredClone((this.data.skillRetrofits ?? []).map(review => ({ ...review,
         questions: review.questions.filter(question => knownLessons.has(question.lessonId)),
       })).filter(review => review.questions.length)),
-      guideEvents: structuredClone((this.data.guideEvents ?? []).slice(-120)),
+      guideEvents: structuredClone((this.data.guideEvents ?? []).slice(-120).map(event => ({ ...event, language: event.language ?? 'javascript' }))),
       focusHistory: this.data.lessons.filter(item => item.focus).slice(-12).map(item => ({ lessonId: item.id, parentLessonId: item.focus!.parentLessonId,
-        conceptId: item.focus!.conceptId, answered: this.data.attempts.filter(attempt => attempt.lessonId === item.id).length,
+        conceptId: item.focus!.conceptId, language: item.language ?? 'javascript', answered: this.data.attempts.filter(attempt => attempt.lessonId === item.id).length,
         total: item.questions.length, endedEarly: (this.data.endedFocusIds ?? []).includes(item.id) })),
       discussions: structuredClone(discussions),
       feedback: structuredClone((this.data.feedback ?? []).filter(item => knownLessons.has(item.lessonId))),
@@ -423,12 +425,12 @@ export class LocalStore {
     writeFileSync(join(this.directory, 'runs', `${job.id}.json`), JSON.stringify(job, null, 2) + '\n', { mode: 0o600 });
   }
 
-  publicState(providers: ProviderStatus[], job: Job | null): AppState {
+  publicState(providers: ProviderStatus[], job: Job | null, languages?: AppState['languages']): AppState {
     const summaries: LessonSummary[] = this.data.lessons.map(lesson => {
       const answered = this.data.attempts.filter(item => item.lessonId === lesson.id).length;
       const complete = answered === lesson.questions.length;
       return { id: lesson.id, objective: lesson.objective, rationale: complete ? lesson.rationale : 'The tutor’s rationale is sealed until this lesson is complete, so it cannot give away the answers.', createdAt: lesson.createdAt,
-        provider: lesson.provider, tutorMode: lesson.tutorMode, answered, total: lesson.questions.length, complete,
+        provider: lesson.provider, tutorMode: lesson.tutorMode, language: lesson.language ?? 'javascript', answered, total: lesson.questions.length, complete,
         reflection: complete ? lesson.reflection : null, assumptions: complete ? lesson.assumptions : [],
         hypotheses: complete ? lesson.hypotheses : [], predictionHash: lesson.predictionHash,
         ...(complete && lesson.curriculum ? { curriculum: lesson.curriculum } : {}),
@@ -436,10 +438,10 @@ export class LocalStore {
         ...((this.data.endedFocusIds ?? []).includes(lesson.id) ? { endedEarly: true } : {}) };
     });
     const current = this.pendingQuestion();
-    return structuredClone({ settings: this.data.settings, providers, job,
+    return structuredClone({ settings: this.data.settings, providers, job, ...(languages ? { languages } : {}),
       currentLesson: summaries.find(item => item.id === this.activeLesson()?.id) ?? null,
       lessonPreview: this.previewConcepts(), guides: this.data.guides ?? [],
-      question: current ? { id: current.id, title: current.title, specification: current.specification, code: current.code,
+      question: current ? { id: current.id, title: current.title, specification: current.specification, code: current.code, language: this.activeLesson()?.language ?? 'javascript',
         purpose: current.purpose, testCount: current.validation.testCount } : null,
       lessons: [...summaries].reverse(), reviews: [...this.data.attempts].reverse().map(item => this.review(item)),
       hypotheses: summaries.filter(item => item.complete).at(-1)?.hypotheses ?? [],

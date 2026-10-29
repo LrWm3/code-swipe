@@ -115,6 +115,14 @@ function priorState(context: TutorContext): PriorState {
 // Preserve strings and operators while removing formatting and comments. This
 // catches cosmetically changed references without equating different literals.
 function codeTokens(source: string, entryName: string): string[] {
+  const python = /^\s*def\s+\w+\s*\(/m.test(source);
+  if (python) {
+    // Ignore the required leading docstring, but preserve ordinary literals and //.
+    const withoutDocstring = source.replace(/(\bdef\s+\w+\s*\([^\n]*\)[^\n]*:\s*\n[ \t]*)(?:"""[\s\S]*?"""|'''[\s\S]*?''')/, '$1');
+    return (withoutDocstring.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|#[^\r\n]*|\w+|\/\/|\*\*|==|!=|<=|>=|[^\s]/g) ?? [])
+      .filter(token => !token.startsWith('#'))
+      .map((token, index, tokens) => token === entryName && tokens[index - 1] === 'def' ? '$entry' : token);
+  }
   return (source.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*|[$\w]+|===|!==|=>|==|!=|<=|>=|\+\+|--|&&|\|\||\?\?|\*\*|[^\s]/g) ?? [])
     .filter(token => !token.startsWith('//') && !token.startsWith('/*'))
     .map((token, index, tokens) => token === entryName && tokens[index - 1] === 'function' ? '$entry' : token);
@@ -161,6 +169,13 @@ export function validateCurriculum(lesson: ProposedLesson, context: TutorContext
   const curriculum = lesson.curriculum;
   const baseline = context.settings.tutorMode === 'baseline';
   const prior = priorState(context);
+  const familyConflicts = lesson.questions.flatMap((question, index) => {
+    const plan = question.plan;
+    const family = plan && prior.families.get(plan.familyId);
+    return plan && family && !sameSet(family.conceptIds, plan.conceptIds)
+      ? [`questions[${index}] ${plan.familyId}: existing [${family.conceptIds.join(', ')}], proposed [${plan.conceptIds.join(', ')}]`] : [];
+  });
+  if (familyConflicts.length) reject('questions.plan.familyId', `an existing family must retain its conceptIds. Repair every conflict: ${familyConflicts.join('; ')}.`);
   const known = new Map((baseline ? [] : context.curriculum?.concepts ?? []).map(concept => [concept.id, concept]));
   const definitions = new Map<string, ConceptUpdate>(known);
   const updates = new Map<string, ConceptUpdate>();

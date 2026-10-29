@@ -1,6 +1,6 @@
 # Code Swipe — local tutor lab
 
-Read a little JavaScript. Swipe right for correct, left for buggy, or choose IDK. Keep playing, and open an explanation whenever you want one.
+Read a little JavaScript or Python. Swipe right for correct, left for buggy, or choose IDK. Keep playing, and open an explanation whenever you want one.
 
 This branch rebuilds Code Swipe around a single teaching agent, powered by your installed **Codex** or **OpenCode** CLI. It keeps a notebook of tentative learner hypotheses, plans short lessons, and commits its predictions *before* you answer. Your answers shape the next lesson. No account system, Firebase, subjects, Elo, or mastery tree.
 
@@ -21,7 +21,15 @@ codex login
 opencode auth login
 ```
 
-Choose your provider in **Setup**, add any interests, and start a lesson. Leave the model blank for the CLI default, or enter a Codex model name / OpenCode `provider/model` identifier. Restart the server after installing a missing CLI. Codex requires **0.153.4 or newer** for this app's isolation options; OpenCode was tested with 1.17.13. Setup shows the version found by the server. If it differs from your terminal's version, set `CODE_SWIPE_CODEX_BIN` in `.env` to the supported executable's absolute path.
+JavaScript runs in the app’s built-in sandbox. For Python, install and start Docker, then download the pinned sandbox image once:
+
+```sh
+docker pull python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
+```
+
+Restart the server after preparing the image. Setup shows whether the Python sandbox is available; the app never falls back to running Python directly on your machine.
+
+Choose your provider and language in **Setup**, add any interests, and start a lesson. Language changes apply to the next lesson; existing questions keep their language, and focused practice uses the guide’s language. Leave the model blank for the CLI default, or enter a Codex model name / OpenCode `provider/model` identifier. Restart the server after installing a missing CLI. Codex requires **0.153.4 or newer** for this app's isolation options; OpenCode was tested with 1.17.13. Setup shows the version found by the server. If it differs from your terminal's version, set `CODE_SWIPE_CODEX_BIN` in `.env` to the supported executable's absolute path.
 
 Drag the card, use the buttons, or press the arrow keys. Answers advance straight to the next card. **Review previous** opens the explanation without interrupting the next question; older answers remain in **Notebook**. IDK records uncertainty without counting as a wrong answer.
 
@@ -37,11 +45,11 @@ The demo uses curated examples and neutral predictions. It is not adaptive. For 
 - Gives each question educational and investigative objectives, with multiple purposes such as practice, transfer, retention, frontier exploration, or checking a teaching strategy. Lessons record their mix, progression, cognitive demand, and scaffolding; planning checks reject missing or inconsistent annotations.
 - Builds durable concept evidence from the lesson archive, including familiarity, uncertainty, prerequisites, representations, and deferred variants. Each lesson includes at most one closely related pair for a new concept; other counterparts stay deferred or unasked with a reason.
 - Distinguishes skills directly targeted, exercised inside a harder task, and merely present. Meaningful embedded practice can keep older skills in use without repeating their original questions. Each card commits what success or failure could indicate for each skill; scaffolded practice, ambiguous answers, and incidental appearances do not establish independent competence.
-- Runs each reference solution and candidate against generated fixtures inside QuickJS, with time and memory limits. Failed batches get one repair attempt before being rejected.
+- Runs each reference solution and candidate against generated fixtures in an isolated, resource-limited sandbox: QuickJS for JavaScript and a disposable Docker container for Python. Failed batches get one repair attempt before being rejected.
 - Saves immutable plan artifacts before showing a question. Answers append to local history; retries do not duplicate them.
 - Records review openings and estimated active viewing time, so the tutor can account for explanations you chose to inspect. Background or unfocused time is paused.
 - Supports optional conversations after a lesson. Each **Send to tutor** or **Update tutor** requests one bounded response from your selected CLI; the next lesson considers saved feedback and replies.
-- Tracks Brier score and calibration separately for each provider and tutor mode. These measure prediction quality, not learning or mastery.
+- Tracks Brier score and calibration separately for each provider, language, and tutor mode. These measure prediction quality, not learning or mastery.
 - Offers a fresh-context baseline that gets the same generation and validation pipeline without learner history or persistent hypotheses.
 
 After a lesson, question reviews include optional intent details. Completed lessons reveal curriculum notes in **Notebook**, separating observed answers from the tutor's interpretation and proposed next action. Later observations build on archived evidence without rewriting earlier intent. These planning rules are experimental, not validated pedagogy or a mastery assessment.
@@ -50,9 +58,9 @@ Existing lessons remain readable without curriculum annotations. Newly generated
 
 Skill memory keeps the last targeted encounter, last meaningful exercise, and last independent supporting answer separately. Raw right/wrong counts still describe whole-card judgments, not successes or failures on every component. The tutor uses the evidence and its uncertainty to choose embedded practice or focused checks; there is no automatic forgetting timer. Skill roles and interpretations are model judgments, not proof of the learner's reasoning. An old prerequisite is not credited merely because it appears in a dependency chain.
 
-Exercises are currently **pure, synchronous JavaScript functions** using JSON inputs and outputs. New lessons use short, natural task descriptions and descriptive function names such as `lastLowStockIndex(counts, threshold)`. Conventional multiline JSDoc explains each parameter's type and constraints; the description focuses on what the function should do. Multiple inputs use ordinary parameters instead of artificial wrapper objects. These hints describe the contract; they do not add TypeScript runtime support. Additional languages remain future work. Tests are finite checks, not proofs: a generated specification, reference solution, or fixture can still be wrong. The flag button exists for that reason.
+Exercises are currently **pure, synchronous JavaScript or Python functions** using JSON-compatible inputs and outputs. Descriptive function names and natural parameter lists are used in both languages. JavaScript uses multiline JSDoc; Python uses multiline docstrings and may include type hints. Constraints belong in the documentation while the task description focuses on behavior. Python currently supports the `math`, `typing`, `collections`, `itertools`, `functools`, and `re` standard-library modules; third-party packages, I/O, classes, generators, and asynchronous functions are outside this first version. Tests are finite checks, not proofs: a generated specification, reference solution, or fixture can still be wrong. The flag button exists for that reason.
 
-Before a lesson that may introduce new concepts, an optional preview links to short concept guides. You can skip straight to the cards, read a guide, or request four or six focused practice cards before returning to the main lesson. You can also open related guides from an answer review. Focused practice can be left early; any answers already given are saved. Guides use reviewed examples for a few common concepts and generate others on demand with your selected tutor. Example expressions are checked in the local sandbox, and reference links come from a small set of MDN pages. Checking examples cannot guarantee the guide's explanation is correct.
+Before a lesson that may introduce new concepts, an optional preview links to short concept guides. You can skip straight to the cards, read a guide, or request four or six focused practice cards before returning to the main lesson. You can also open related guides from an answer review. Focused practice can be left early; any answers already given are saved. Guides use reviewed examples for a few common concepts and generate others on demand with your selected tutor. Guides and reference links are specific to their language, and example expressions are checked in that language’s sandbox. Checking examples cannot guarantee the guide's explanation is correct.
 
 Guide opens, completed readings, optional familiarity reports, and focused-practice answers are stored separately from committed lesson plans. Reading a guide or reporting familiarity is not treated as proof of understanding. If you study after a lesson's predictions were committed, review shows that teaching occurred before your answer; the original predictions are preserved.
 

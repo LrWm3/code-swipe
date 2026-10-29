@@ -31,7 +31,7 @@ export function buildDiscussionPrompt(context: DiscussionContext): string {
     const evidence = attempts.filter(attempt => !attempt.flagged);
     return {
       lesson: {
-        id: lesson.id, createdAt: lesson.createdAt, objective: lesson.objective,
+        id: lesson.id, createdAt: lesson.createdAt, language: lesson.language ?? 'javascript', objective: lesson.objective,
         reflection: lesson.reflection, hypotheses: lesson.hypotheses,
         questions: lesson.questions.filter(question => evidence.some(attempt => attempt.exerciseId === question.id)).map(question => ({
           id: question.id, title: question.title, specification: question.specification,

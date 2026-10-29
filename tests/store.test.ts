@@ -130,7 +130,7 @@ test('given an unanswered lesson, when requesting public state, then future verd
   });
   const committed = store.commitLesson(proposal, context.settings);
   const before = store.publicState([], null);
-  assert.deepEqual(Object.keys(before.question!).sort(), ['id', 'title', 'specification', 'code', 'purpose', 'testCount'].sort());
+  assert.deepEqual(Object.keys(before.question!).sort(), ['id', 'title', 'specification', 'code', 'language', 'purpose', 'testCount'].sort());
   assert.deepEqual(before.reviews, []);
   assert.deepEqual(before.hypotheses, []);
   assert.equal(before.currentLesson?.reflection, null);

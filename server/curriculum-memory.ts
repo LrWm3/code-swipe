@@ -63,7 +63,7 @@ function summarizeEvidence(evidence: LinkedAttempt[], cited: Set<string>, famili
   return [...selected.values()].sort((a, b) => Date.parse(b.attempt.answeredAt) - Date.parse(a.attempt.answeredAt))
     .map(({ attempt, lesson, question, skills }) => ({
       attemptId: attempt.id, lessonId: lesson.id, title: question.title,
-      answer: attempt.answer, correct: attempt.correct, answeredAt: attempt.answeredAt,
+      answer: attempt.answer, correct: attempt.correct, answeredAt: attempt.answeredAt, language: lesson.language ?? 'javascript',
       ...skills.get(conceptId),
     }));
 }
@@ -190,6 +190,15 @@ export function buildCurriculumMemory(data: StoreData): CurriculumMemory {
     });
     const cited = new Set(record.evidenceAttemptIds);
     const evidence = evidenceByConcept.get(record.id) ?? [];
+    record.languagePractice = {};
+    for (const item of evidence) {
+      const language = item.lesson.language ?? 'javascript';
+      const counts = record.languagePractice[language] ??= { exposures: 0, supporting: 0, challenging: 0 };
+      counts.exposures++;
+      const signal = item.skills.get(record.id)?.signal;
+      if (signal === 'supports') counts.supporting++;
+      if (signal === 'challenges') counts.challenging++;
+    }
     const correctCitations = evidence.filter(item => cited.has(item.attempt.id) && familiaritySupport(item.skills.get(record.id) ?? {}));
     const supportsFamiliarity = correctCitations.length >= 3 && new Set(correctCitations.map(item => item.lesson.id)).size >= 2;
 

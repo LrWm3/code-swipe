@@ -50,3 +50,19 @@ export function validateArguments(input: JsonValue, signature: FunctionSignature
     throw new Error(`inputJson must encode an array of ${signature.parameters.length} positional arguments, matching signature.parameters.`);
   }
 }
+
+export function validatePythonQuestionFormat(question: { signature: FunctionSignature; code: string; referenceCode: string }): void {
+  validateSignature(question.signature);
+  let candidateDoc = '';
+  for (const field of ['code', 'referenceCode'] as const) {
+    const expression = new RegExp(`^def\\s+${question.signature.name}\\s*\\([^\\n]*\\)\\s*(?:->\\s*[^:\\n]+)?\\s*:\\s*\\n[ \\t]*("""|''')([\\s\\S]*?)\\1`, 'm');
+    const match = expression.exec(question[field]);
+    if (!match || !match[2].includes('\n')) throw new Error(`${field} must define ${question.signature.name} with a conventional multiline Python docstring.`);
+    for (const parameter of question.signature.parameters) {
+      const documented = new RegExp(`^\\s*(?:${parameter}(?:\\s*\\([^\\n)]*\\))?\\s*:|:param(?:\\s+\\w+)?\\s+${parameter}\\s*:)`, 'm');
+      if (!documented.test(match[2])) throw new Error(`${field}: document parameter ${parameter} in the docstring.`);
+    }
+    if (field === 'code') candidateDoc = match[2];
+    else if (match[2] !== candidateDoc) throw new Error('Candidate and reference must have identical docstring contracts.');
+  }
+}

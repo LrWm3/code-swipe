@@ -1,4 +1,5 @@
 export type ProviderId = 'codex' | 'opencode' | 'demo';
+export type Language = 'javascript' | 'python';
 export type Verdict = 'buggy' | 'correct';
 export type Answer = Verdict | 'idk';
 export const PURPOSES = ['diagnostic', 'practice', 'transfer', 'retention', 'introduction', 'frontier', 'robustness', 'calibration', 'strategy-evaluation'] as const;
@@ -79,7 +80,8 @@ export interface ConceptRecord extends ConceptUpdate {
     supporting: number; challenging: number; inconclusive: number;
     lastTargetedAt: string | null; lastExercisedAt: string | null; lastIndependentSuccessAt: string | null;
   };
-  evidence: ({ attemptId: string; lessonId: string; title: string; answer: Answer; correct: boolean | null; answeredAt: string } & Partial<SkillEvidence>)[];
+  languagePractice?: Partial<Record<Language, { exposures: number; supporting: number; challenging: number }>>;
+  evidence: ({ attemptId: string; lessonId: string; title: string; answer: Answer; correct: boolean | null; answeredAt: string; language?: Language } & Partial<SkillEvidence>)[];
 }
 export interface VariantRecord {
   familyId: string;
@@ -100,6 +102,8 @@ export interface CurriculumMemory {
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 export interface Settings {
+  // Missing only in notebooks created before language selection.
+  language?: Language;
   provider: ProviderId;
   model: string;
   interests: string;
@@ -153,6 +157,8 @@ export interface ValidationReport {
 }
 export interface Exercise extends ProposedQuestion { id: string; validation: ValidationReport }
 export interface Lesson extends Omit<ProposedLesson, 'questions'> {
+  // Missing means JavaScript for sealed lessons created before language selection.
+  language?: Language;
   id: string;
   createdAt: string;
   provider: ProviderId;
@@ -165,6 +171,7 @@ export interface Lesson extends Omit<ProposedLesson, 'questions'> {
 }
 export interface GuideConcept { id: string; name: string; description: string }
 export interface ConceptGuide {
+  language?: Language;
   conceptId: string;
   version: string;
   createdAt: string;
@@ -175,6 +182,7 @@ export interface ConceptGuide {
   links: { title: string; url: string }[];
 }
 export interface GuideEvent {
+  language?: Language;
   id: string;
   conceptId: string;
   version: string | null;
@@ -284,7 +292,7 @@ export interface TutorContext {
   draft?: ProposedLesson;
   focus?: { concept: GuideConcept; parentLessonId: string; avoidQuestions?: ProposedQuestion[] };
   guideEvents?: GuideEvent[];
-  focusHistory?: { lessonId: string; parentLessonId: string; conceptId: string; answered: number; total: number; endedEarly: boolean }[];
+  focusHistory?: { lessonId: string; parentLessonId: string; conceptId: string; language?: Language; answered: number; total: number; endedEarly: boolean }[];
 }
 export interface Job {
   id: string;
@@ -295,6 +303,7 @@ export interface Job {
   kind?: 'lesson' | 'discussion' | 'guide' | 'focus';
   lessonId?: string;
   conceptId?: string;
+  language?: Language;
 }
 export interface CalibrationBin { label: string; count: number; predicted: number | null; actual: number | null }
 export interface Metrics {
@@ -305,6 +314,7 @@ export interface Metrics {
   byPurpose: { purpose: Purpose; count: number; accuracy: number | null }[];
 }
 export interface PublicQuestion {
+  language?: Language;
   id: string;
   title: string;
   specification: string;
@@ -313,6 +323,7 @@ export interface PublicQuestion {
   testCount: number;
 }
 export interface Review {
+  language?: Language;
   attempt: Attempt;
   question: Exercise;
   lessonObjective: string;
@@ -322,6 +333,7 @@ export interface Review {
   teachingBeforeAnswer?: string[];
 }
 export interface LessonSummary {
+  language?: Language;
   id: string;
   objective: string;
   rationale: string;
@@ -342,6 +354,7 @@ export interface LessonSummary {
   endedEarly?: boolean;
 }
 export interface AppState {
+  languages?: { id: Language; available: boolean; detail: string }[];
   settings: Settings;
   providers: ProviderStatus[];
   job: Job | null;

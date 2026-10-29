@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { validateCurriculum } from '../server/curriculum-validation.ts';
+import { mirrors, validateCurriculum } from '../server/curriculum-validation.ts';
 import type { ConceptRecord, ConceptUpdate, Lesson, ProposedLesson, TutorContext } from '../src/types.ts';
 
 function context(batchSize = 8): TutorContext {
@@ -97,6 +97,30 @@ test('given cold-start curricula at every supported size, when checking semantic
     proposal.questions.forEach((question, index) => { question.prediction.pCorrect = index % 2 ? 0.9 : 0.2; });
     assert.doesNotThrow(() => validateCurriculum(proposal, context(size)));
   }
+});
+
+test('given Python references, when comparing variants, then docstrings and function names do not hide duplicates or erase floor division', () => {
+  const [left, right] = lesson().questions;
+  left.signature = { name: 'halve_count', parameters: ['count'] };
+  right.signature = { name: 'split_total', parameters: ['count'] };
+  left.referenceCode = 'def halve_count(count):\n    """Halve count."""\n    return count // 2';
+  right.referenceCode = 'def split_total(count):\n    """Split the total."""\n    return count // 2';
+  assert.equal(mirrors(left, right), true);
+  right.referenceCode = right.referenceCode.replace('//', '/');
+  assert.equal(mirrors(left, right), false);
+});
+
+test('given several historical family conflicts, when checking a plan, then repair feedback identifies each conflict', () => {
+  const tutor = context(); memory(tutor, []);
+  tutor.curriculum!.variants = ['increment-0', 'increment-1'].map(familyId => ({
+    familyId, conceptIds: ['other'], title: 'Prior family', counterpart: 'defer' as const,
+    reason: 'Wait.', askedCount: 0, lastAskedAt: null,
+  }));
+  assert.throws(() => validateCurriculum(lesson(), tutor), error => {
+    assert.match(String(error), /increment-0/);
+    assert.match(String(error), /increment-1/);
+    return true;
+  });
 });
 
 test('given missing curriculum or question plans, when publishing new lessons, then legacy optional types do not bypass planning', () => {

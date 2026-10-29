@@ -5,11 +5,13 @@ import { PURPOSES } from '../src/types.ts';
 import { curriculumSchema, questionPlanSchema, validateSchema } from './prompts.ts';
 import { mirrors, validateCurriculum } from './curriculum-validation.ts';
 import { questionSkills } from './skill-evidence.ts';
-import { validateArguments, validateQuestionFormat, validateSignature } from './question-format.ts';
+import { validateArguments, validatePythonQuestionFormat, validateQuestionFormat, validateSignature } from './question-format.ts';
+import { executePython } from './python-runtime.ts';
 
 const MAX_PAYLOAD = 180_000;
 const MAX_VALUE = 16_000;
-const EXECUTION_MS = 100;
+// Includes VM setup and wall-clock scheduling, so allow headroom on busy hosts.
+const EXECUTION_MS = 1_000;
 const MEMORY_BYTES = 16 * 1024 * 1024;
 
 export class LessonValidationError extends Error {
@@ -144,8 +146,13 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
     string(question.specification, `${path}.specification`, 2_000);
     string(question.code, `${path}.code`, 6_000);
     string(question.referenceCode, `${path}.referenceCode`, 6_000);
+    if (context.settings.language === 'python' && question.signature === undefined) reject(`${path}.signature`, 'is required for Python questions.');
     if (question.signature !== undefined) {
-      try { validateQuestionFormat(question as unknown as { signature: FunctionSignature; code: string; referenceCode: string }); }
+      try {
+        const formatted = question as unknown as { signature: FunctionSignature; code: string; referenceCode: string };
+        if (context.settings.language === 'python') validatePythonQuestionFormat(formatted);
+        else validateQuestionFormat(formatted);
+      }
       catch (error) { reject(path, (error as Error).message); }
     }
     string(question.explanation, `${path}.explanation`, 2_000);
@@ -201,6 +208,14 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
         catch (error) { reject(testPath, (error as Error).message); }
       }
       checkJSON(test.expected, `${testPath}.expected`, MAX_VALUE);
+      if (context.settings.language === 'python') {
+        const pending: unknown[] = [test.input, test.expected];
+        while (pending.length) {
+          const value = pending.pop();
+          if (typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)) reject(testPath, 'Python fixtures must use integers within the safe JSON range.');
+          if (value && typeof value === 'object') pending.push(...Object.values(value));
+        }
+      }
       const signature = canonical(test.input);
       if (inputs.has(signature)) reject(`${testPath}.input`, 'duplicates an existing fixture; provide at least four distinct inputs.');
       inputs.add(signature);
@@ -396,13 +411,24 @@ export async function validateLesson(proposal: unknown, context: TutorContext, s
   for (let i = 0; i < lesson.questions.length; i++) {
     const question = lesson.questions[i];
     const report: ValidationReport = { checkedAt: new Date().toISOString(), testCount: question.tests.length, passedCount: 0, failures: [] };
-    for (let j = 0; j < question.tests.length; j++) {
+    const checkFixture = async (j: number) => {
       const fixture = question.tests[j];
-      const reference = await execute(question.referenceCode, fixture.input, `questions[${i}].referenceCode (fixture ${j + 1})`, signal, question.signature);
+      const run = (code: string, path: string) => context.settings.language === 'python'
+        ? executePython(code, fixture.input, path, signal, question.signature!)
+        : execute(code, fixture.input, path, signal, question.signature);
+      const reference = await run(question.referenceCode, `questions[${i}].referenceCode (fixture ${j + 1})`);
       if (reference.error !== null || canonical(reference.actual) !== canonical(fixture.expected)) reject(`questions[${i}].tests[${j}]`, 'referenceCode does not produce the expected output; repair the reference or fixture before labelling the candidate.');
-      const observed = await execute(question.code, fixture.input, `questions[${i}].code (fixture ${j + 1})`, signal, question.signature);
+      const observed = await run(question.code, `questions[${i}].code (fixture ${j + 1})`);
+      return { fixture, observed };
+    };
+    // Two isolated fixtures at a time limit container usage without slowing an
+    // entire lesson to one container startup per fixture.
+    for (let j = 0; j < question.tests.length; j += context.settings.language === 'python' ? 2 : 1) {
+      const checks = await Promise.all(Array.from({ length: Math.min(context.settings.language === 'python' ? 2 : 1, question.tests.length - j) }, (_, offset) => checkFixture(j + offset)));
+      for (const { fixture, observed } of checks) {
       if (observed.error === null && canonical(observed.actual) === canonical(fixture.expected)) report.passedCount++;
       else report.failures.push({ input: fixture.input, expected: fixture.expected, actual: observed.actual, error: observed.error });
+      }
     }
     if (question.verdict === 'correct' && report.failures.length) reject(`questions[${i}].verdict`, `labelled correct but failed ${report.failures.length}/${report.testCount} fixtures; repair code or label.`);
     if (question.verdict === 'buggy' && !report.failures.length) reject(`questions[${i}].verdict`, 'labelled buggy but passed every fixture; provide a concrete counterexample or label correct.');

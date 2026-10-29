@@ -289,6 +289,7 @@ export async function generateDiscussion(context: DiscussionContext, options: Ge
 }
 
 export async function generateGuide(settings: TutorContext['settings'], concept: GuideConcept, options: GenerationOptions): Promise<ConceptGuide> {
-  const raw = await runStructuredTutor(settings, { prompt: guidePrompt(concept), schema: guideSchema, subject: 'guide' }, options);
-  return parseGuide(raw, concept, options.signal);
+  const language = settings.language ?? 'javascript';
+  const raw = await runStructuredTutor(settings, { prompt: guidePrompt(concept, language), schema: guideSchema, subject: 'guide' }, options);
+  return parseGuide(raw, concept, options.signal, language);
 }

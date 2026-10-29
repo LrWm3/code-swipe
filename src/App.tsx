@@ -3,16 +3,26 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, Code2, Download, Flag, FlaskConical, HelpCircle, LoaderCircle, Settings2, ShieldCheck, Sparkles, Terminal, X } from 'lucide-react';
 import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
-import type { Answer, AppState, CurriculumPlan, Discussion, GuideConcept, ConceptGuide, GuideEvent, Hypothesis, Job, JsonValue, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
+import python from 'highlight.js/lib/languages/python';
+import type { Answer, AppState, CurriculumPlan, Discussion, GuideConcept, ConceptGuide, GuideEvent, Hypothesis, Job, JsonValue, Language, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
 import { flushReviewSessions, useAnswerClock, useReviewSync, useReviewTiming } from './ui';
 import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from './lesson-sizes';
 
 hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('python', python);
+const LANGUAGE_NAMES: Record<Language, string> = { javascript: 'JavaScript', python: 'Python' };
 const PROVIDER_NAMES: Record<ProviderId, string> = { codex: 'Codex', opencode: 'OpenCode', demo: 'Practice demo' };
-const defaults: Settings = { provider: 'demo', model: '', interests: '', batchSize: DEFAULT_LESSON_SIZE, tutorMode: 'reflective' };
+const defaults: Settings = { provider: 'demo', language: 'javascript', model: '', interests: '', batchSize: DEFAULT_LESSON_SIZE, tutorMode: 'reflective' };
 const percent = (value: number | null) => value === null ? '—' : `${Math.round(value * 100)}%`;
 const date = (value: string) => new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const json = (value: unknown) => JSON.stringify(value, null, 2);
+const pythonLiteral = (value: JsonValue): string => {
+  if (value === null) return 'None';
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  if (Array.isArray(value)) return `[${value.map(pythonLiteral).join(', ')}]`;
+  if (typeof value === 'object') return `{${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)}: ${pythonLiteral(item)}`).join(', ')}}`;
+  return JSON.stringify(value);
+};
 const answerLabel = (answer: Answer) => answer === 'idk' ? 'IDK' : answer === 'correct' ? 'Correct' : 'Buggy';
 const resultLabel = (correct: boolean | null) => correct === null ? 'IDK · ungraded' : correct ? 'Correct answer' : 'Incorrect answer';
 const quickResultLabel = (correct: boolean | null) => correct === null ? 'IDK · ungraded' : correct ? 'Correct!' : 'Incorrect';
@@ -45,9 +55,9 @@ async function api<T>(path: string, method = 'GET', body?: unknown, signal?: Abo
   }
 }
 
-function Code({ code }: { code: string }) {
-  const highlighted = useMemo(() => hljs.highlight(code, { language: 'javascript' }).value, [code]);
-  return <pre className="code-block" tabIndex={0} aria-label="JavaScript source"><code dangerouslySetInnerHTML={{ __html: highlighted }} /></pre>;
+function Code({ code, language = 'javascript' }: { code: string; language?: Language }) {
+  const highlighted = useMemo(() => hljs.highlight(code, { language }).value, [code, language]);
+  return <pre className="code-block" tabIndex={0} aria-label={`${LANGUAGE_NAMES[language]} source`}><code dangerouslySetInnerHTML={{ __html: highlighted }} /></pre>;
 }
 
 function Badge({ children, tone = '' }: { children: React.ReactNode; tone?: string }) {
@@ -67,7 +77,7 @@ function PreviousAnswer({ review, disabled, onReview }: { review: Review; disabl
 function Accountability({ metrics, settings }: { metrics: Metrics; settings: Settings }) {
   return <section className="panel accountability">
     <div className="eyebrow"><ShieldCheck size={15} /> Tutor accountability</div>
-    <h2>How well does it predict?</h2><p className="fine-print">{PROVIDER_NAMES[settings.provider]} · {settings.tutorMode} mode</p>
+    <h2>How well does it predict?</h2><p className="fine-print">{PROVIDER_NAMES[settings.provider]} · {LANGUAGE_NAMES[settings.language ?? 'javascript']} · {settings.tutorMode} mode</p>
     <p className="muted">These measure the tutor’s predictions of your answers, not learning or mastery.</p>
     <div className="metric-grid">
       <div><strong data-testid="brier-score">{metrics.brier === null ? '—' : metrics.brier.toFixed(3)}</strong><span>Brier score</span></div>
@@ -98,7 +108,7 @@ function ReviewPanel({ review, pending, onFlag, onGuide }: { review: Review; pen
   const renderCheck = ({ test, index, failure }: typeof checks[number]) => (
     <div className={`test-case ${failure ? 'failed' : ''}`} key={index}>
       <div className="test-heading"><span>{failure ? <X size={15} /> : <Check size={15} />} Check {index + 1}{failure ? ' · counterexample' : ' · passed'}</span>{test.note && <small>{test.note}</small>}</div>
-      <dl><div><dt>{question.signature ? 'Call' : 'Input'}</dt><dd><code>{question.signature ? `${question.signature.name}(${(test.input as JsonValue[]).map(value => JSON.stringify(value)).join(', ')})` : json(test.input)}</code></dd></div><div><dt>Expected</dt><dd><code>{json(test.expected)}</code></dd></div><div><dt>Actual</dt><dd><code>{failure ? (failure.error || json(failure.actual)) : json(test.expected)}</code></dd></div></dl>
+      <dl><div><dt>{question.signature ? 'Call' : 'Input'}</dt><dd><code>{question.signature ? `${question.signature.name}(${(test.input as JsonValue[]).map(value => review.language === 'python' ? pythonLiteral(value) : JSON.stringify(value)).join(', ')})` : json(test.input)}</code></dd></div><div><dt>Expected</dt><dd><code>{json(test.expected)}</code></dd></div><div><dt>Actual</dt><dd><code>{failure ? (failure.error || json(failure.actual)) : json(test.expected)}</code></dd></div></dl>
     </div>
   );
   return <div className="review-content" data-testid="answer-review">
@@ -123,8 +133,8 @@ function ReviewPanel({ review, pending, onFlag, onGuide }: { review: Review; pen
         <details className="plain-details"><summary>Original reference implementation</summary><Code code={review.originalPresentation.referenceCode} /></details>
       </details>
     </div>}
-    <details className="plain-details code-details"><summary>Revisit this code and specification</summary><p>{question.specification}</p><Code code={question.code} /></details>
-    <details className="plain-details code-details"><summary>Reference implementation</summary><Code code={question.referenceCode} /></details>
+    <details className="plain-details code-details"><summary>Revisit this code and specification</summary><p>{question.specification}</p><Code code={question.code} language={review.language} /></details>
+    <details className="plain-details code-details"><summary>Reference implementation</summary><Code code={question.referenceCode} language={review.language} /></details>
     <div className="prediction-box">
       <div className="eyebrow"><ShieldCheck size={15} /> Committed before your answer</div>
       <h3>{percent(question.prediction.pCorrect)} predicted chance you would answer correctly</h3>
@@ -226,7 +236,7 @@ function Notebook({ state, selectedId, onSelect, onReview, onPractice }: { state
   };
   return <div className="notebook-view"><div className="page-intro"><div><div className="eyebrow">Your local record</div><h1>Tutor notebook</h1><p className="muted">Lessons, answers, feedback, and the tutor’s reasoning.</p></div><a className="button quiet" href="/api/export" download><Download size={17} /> Export record</a></div>
     <details className="notebook-metrics"><summary>Tutor prediction metrics</summary><Accountability metrics={state.metrics} settings={state.settings} /></details>
-    {ordered.length === 0 ? <div className="panel empty-state"><BookOpen size={36} /><h2>A fresh notebook.</h2><p>Your first lesson will appear here.</p></div> : <div className="notebook-grid"><div className="lesson-list" aria-label="Lessons">{ordered.map((lesson, index) => <button key={lesson.id} onClick={() => onSelect(lesson.id)} className={`lesson-list-item ${selected?.id === lesson.id ? 'selected' : ''}`} aria-pressed={selected?.id === lesson.id}><span className="small-label">Lesson {ordered.length - index} · {PROVIDER_NAMES[lesson.provider]}</span><strong>{lesson.objective}</strong><span>{date(lesson.createdAt)}</span><span className="lesson-list-status">{lesson.answered}/{lesson.total} answers <Badge tone={lesson.complete ? 'green' : ''}>{lesson.complete ? 'Complete' : lesson.endedEarly ? 'Left early' : 'In progress'}</Badge></span></button>)}</div>
+    {ordered.length === 0 ? <div className="panel empty-state"><BookOpen size={36} /><h2>A fresh notebook.</h2><p>Your first lesson will appear here.</p></div> : <div className="notebook-grid"><div className="lesson-list" aria-label="Lessons">{ordered.map((lesson, index) => <button key={lesson.id} onClick={() => onSelect(lesson.id)} className={`lesson-list-item ${selected?.id === lesson.id ? 'selected' : ''}`} aria-pressed={selected?.id === lesson.id}><span className="small-label">Lesson {ordered.length - index} · {PROVIDER_NAMES[lesson.provider]} · {LANGUAGE_NAMES[lesson.language ?? 'javascript']}</span><strong>{lesson.objective}</strong><span>{date(lesson.createdAt)}</span><span className="lesson-list-status">{lesson.answered}/{lesson.total} answers <Badge tone={lesson.complete ? 'green' : ''}>{lesson.complete ? 'Complete' : lesson.endedEarly ? 'Left early' : 'In progress'}</Badge></span></button>)}</div>
       {selected && <section key={selected.id} id="lesson-overview" tabIndex={-1} className="panel notebook-detail"><div className="eyebrow">{PROVIDER_NAMES[selected.provider]} · {selected.tutorMode}</div><h2>{selected.objective}</h2><p>{selected.rationale}</p>
         {selected.complete ? <><div id="lesson-reflection" tabIndex={-1} className="notebook-section"><h3>Reflection before this lesson</h3><p className="preserve-lines">{selected.reflection || 'No prior reflection recorded.'}</p></div><div id="lesson-assumptions" tabIndex={-1} className="notebook-section"><h3>Starting assumptions</h3>{selected.assumptions.length ? <ul>{selected.assumptions.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p className="muted">No assumptions recorded.</p>}</div><div id="lesson-hypotheses" tabIndex={-1} className="notebook-section"><h3>Working hypotheses</h3><p className="fine-print">These are tentative explanations, not fixed labels about you.</p>{selected.hypotheses.length ? selected.hypotheses.map((hypothesis) => <HypothesisCard key={hypothesis.id} hypothesis={hypothesis} reviews={state.reviews} />) : <p className="muted">No hypotheses recorded for this lesson.</p>}</div></> : <div className="notice">{selected.endedEarly ? 'You left this focused practice early. Your answers are saved.' : 'Finish this lesson to reveal its assumptions, reflection, and hypotheses.'}</div>}
         {selected.complete && selected.curriculum && <CurriculumDetails curriculum={selected.curriculum} reviews={state.reviews} lessonReviews={reviews} />}
@@ -260,15 +270,15 @@ function ReviewDialog({ review, pending, error, onFlag, onGuide, onClose }: { re
   </dialog>;
 }
 
-function GuideDialog({ concept, guide, job, pending, error, canPractice, onClose, onDone, onReport, onPractice, onCancel, onRetry }: {
-  concept: GuideConcept; guide?: ConceptGuide; job: Job | null; pending: boolean; error: string; canPractice: boolean;
+function GuideDialog({ concept, language, guide, job, pending, error, canPractice, onClose, onDone, onReport, onPractice, onCancel, onRetry }: {
+  concept: GuideConcept; language: Language; guide?: ConceptGuide; job: Job | null; pending: boolean; error: string; canPractice: boolean;
   onClose: () => void; onDone: () => void; onReport: (action: GuideEvent['action']) => void;
   onPractice: (length: number) => void; onCancel: () => void; onRetry: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [length, setLength] = useState(4);
   const [report, setReport] = useState('');
-  const isThisConcept = job?.conceptId === concept.id && (job.kind === 'guide' || job.kind === 'focus');
+  const isThisConcept = job?.conceptId === concept.id && (job.language ?? 'javascript') === language && (job.kind === 'guide' || job.kind === 'focus');
   const working = job?.status === 'running' && isThisConcept;
   const failure = job?.status === 'error' && isThisConcept ? job.message : '';
   useEffect(() => {
@@ -285,7 +295,7 @@ function GuideDialog({ concept, guide, job, pending, error, canPractice, onClose
         {working && <div className="job-stage" role="status"><LoaderCircle size={20} className="spin" /><p>{job?.message}</p><button className="button compact quiet" onClick={onCancel}>Cancel</button></div>}
         {!guide && !working && <div><p className="muted">{concept.description}</p><button className="button quiet" onClick={onRetry} disabled={pending}>Prepare guide</button></div>}
         {guide && <><p className="guide-description">{guide.description}</p>
-          <div className="guide-examples">{guide.examples.map((example, index) => <div className="guide-example" key={index}><Code code={`${example.expression} // ${JSON.stringify(example.result)}`} /><p>{example.explanation}</p></div>)}</div>
+          <div className="guide-examples">{guide.examples.map((example, index) => <div className="guide-example" key={index}><Code language={language} code={`${example.expression} ${language === 'python' ? '#' : '//'} ${language === 'python' ? pythonLiteral(example.result) : JSON.stringify(example.result)}`} /><p>{example.explanation}</p></div>)}</div>
           <p className="guide-takeaway"><strong>Keep in mind:</strong> {guide.takeaway}</p>
           {guide.links.length > 0 && <div className="review-section"><h3>More reading</h3>{guide.links.map(link => <a className="guide-link" key={link.url} href={link.url} target="_blank" rel="noopener noreferrer">{link.title} ↗</a>)}</div>}
           <div className="review-section"><h3>How does this feel?</h3><p className="fine-print">Optional. Your response helps the tutor plan; it isn’t a grade.</p><div className="concept-links"><button className="button compact quiet" disabled={pending} onClick={() => { setReport('familiar'); onReport('familiar'); }} aria-pressed={report === 'familiar'}>I know this</button><button className="button compact quiet" disabled={pending} onClick={() => { setReport('unclear'); onReport('unclear'); }} aria-pressed={report === 'unclear'}>Still unclear</button></div></div>
@@ -371,12 +381,15 @@ function LessonComplete({ lesson, reviews, discussion, job, pending, canPlan, re
 
 function SettingsPanel({ state, settings, setSettings, onSave, pending }: { state: AppState; settings: Settings; setSettings: (settings: Settings) => void; onSave: () => void; pending: boolean }) {
   const selected = state.providers.find((provider) => provider.id === settings.provider);
+  const languageStatus = state.languages?.find(item => item.id === (settings.language ?? 'javascript'));
   const dirty = JSON.stringify(settings) !== JSON.stringify(state.settings);
   return <div className="settings-view"><div className="page-intro"><div><div className="eyebrow">Make it yours</div><h1>Your tutor setup</h1><p className="muted">Choose one local agent, tell it what interests you, and take a small lesson.</p></div></div><div className="settings-grid"><form className="panel settings-form" onSubmit={(event) => { event.preventDefault(); onSave(); }}>
     <label htmlFor="provider">Tutor provider</label><select id="provider" data-testid="provider-select" value={settings.provider} onChange={(event) => setSettings({ ...settings, provider: event.target.value as ProviderId })}><option value="codex">Codex</option><option value="opencode">OpenCode</option><option value="demo">Practice demo · no agent needed</option></select>
     <div className="provider-status" role="status"><span className={`status-dot ${selected?.available ? '' : 'offline'}`} /><div><strong>{settings.provider === 'demo' ? 'Ready to try' : selected?.available ? 'Installed · login separately' : 'Not detected'}</strong><p>{selected?.detail || 'Provider information unavailable.'}</p>{selected?.version && <code>{selected.version}</code>}</div></div>
     {settings.provider !== 'demo' && <><label htmlFor="model">Model <span className="label-note">optional</span></label><input id="model" value={settings.model} placeholder="Use the agent’s default model" onChange={(event) => setSettings({ ...settings, model: event.target.value })} /><p className="field-help">Use a model name your selected agent supports. Authenticate in its CLI before starting a lesson.</p></>}
-    <label htmlFor="interests">What would you like to get better at?</label><textarea id="interests" data-testid="interests-input" rows={4} value={settings.interests} onChange={(event) => setSettings({ ...settings, interests: event.target.value })} placeholder="For example: JavaScript array logic, edge cases in data pipelines, and code I might see in interviews." /><p className="field-help">Plain language is enough. Lessons use small, executable JavaScript functions.</p>
+    <label htmlFor="language">Programming language</label><select id="language" data-testid="language-select" value={settings.language ?? 'javascript'} onChange={event => setSettings({ ...settings, language: event.target.value as Language })}><option value="javascript">JavaScript</option><option value="python">Python</option></select>
+    {languageStatus && <p className="field-help" role="status">{languageStatus.detail}</p>}
+    <label htmlFor="interests">What would you like to get better at?</label><textarea id="interests" data-testid="interests-input" rows={4} value={settings.interests} onChange={(event) => setSettings({ ...settings, interests: event.target.value })} placeholder="For example: JavaScript array logic, edge cases in data pipelines, and code I might see in interviews." /><p className="field-help">Plain language is enough. Lessons use small, executable functions in your selected language.</p>
     <fieldset><legend>Cards per lesson</legend><div className="segmented">{LESSON_SIZES.map((size) => <button key={size} type="button" className={settings.batchSize === size ? 'selected' : ''} onClick={() => setSettings({ ...settings, batchSize: size })} aria-pressed={settings.batchSize === size}>{size} cards</button>)}</div></fieldset>
     <details className="plain-details"><summary>Experimental comparison</summary><label htmlFor="tutor-mode">Tutor mode</label><select id="tutor-mode" value={settings.tutorMode} onChange={(event) => setSettings({ ...settings, tutorMode: event.target.value as Settings['tutorMode'] })}><option value="reflective">Reflective tutor</option><option value="baseline">Baseline · experimental</option></select><p className="field-help">Reflective mode asks the tutor to revisit its hypotheses using prior answers. Baseline offers a comparison without that reflection. Neither is evidence of improved learning.</p></details>
     <div className="form-footer"><span className="fine-print">{dirty ? 'Unsaved changes' : 'Settings saved locally'}</span><button className="button primary" type="submit" disabled={pending || !dirty} data-testid="save-settings">{pending ? <LoaderCircle size={17} className="spin" /> : <Check size={17} />} Save settings</button></div>
@@ -393,6 +406,7 @@ export default function App() {
   const [connectionError, setConnectionError] = useState('');
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [guideConcept, setGuideConcept] = useState<GuideConcept | null>(null);
+  const [guideLanguage, setGuideLanguage] = useState<Language>('javascript');
   const [guideReturnReview, setGuideReturnReview] = useState<string | null>(null);
   const [guideToken, setGuideToken] = useState('');
   const [waitingForFocus, setWaitingForFocus] = useState(false);
@@ -414,6 +428,7 @@ export default function App() {
   const running = state?.job?.status === 'running';
   const discussing = running && state?.job?.kind === 'discussion';
   const chosenProvider = state?.providers.find((provider) => provider.id === state.settings.provider);
+  const chosenLanguage = state?.languages?.find(item => item.id === (state.settings.language ?? 'javascript'));
   const readAnswerTime = useAnswerClock(state?.question?.id, view === 'practice' && !review && !guideConcept && !pending && !running && !state?.lessonPreview?.length);
 
   const acceptState = useCallback((next: AppState) => {
@@ -460,7 +475,7 @@ export default function App() {
   }, [refresh]);
   useEffect(() => {
     if (state) setSettings(state.settings);
-  }, [state?.settings.provider, state?.settings.model, state?.settings.interests, state?.settings.batchSize, state?.settings.tutorMode]);
+  }, [state?.settings.provider, state?.settings.model, state?.settings.interests, state?.settings.batchSize, state?.settings.tutorMode, state?.settings.language]);
   useEffect(() => {
     if (!running && !connectionError) return;
     const controller = new AbortController();
@@ -497,22 +512,23 @@ export default function App() {
     finally { busy.current = false; revision.current += 1; if (mounted.current) setPending(''); }
   }, [refresh]);
 
-  const openGuide = (concept: GuideConcept) => {
+  const openGuide = (concept: GuideConcept, language: Language = state?.currentLesson?.language ?? state?.settings.language ?? 'javascript') => {
     setGuideReturnReview(reviewId);
     setReviewId(null);
     setGuideConcept(concept);
+    setGuideLanguage(language);
     setGuideToken(crypto.randomUUID());
-    void mutate('guide', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(concept.id)}/guide`, 'POST')));
+    void mutate('guide', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(concept.id)}/guide`, 'POST', { language })));
   };
   const closeGuide = () => { setGuideConcept(null); if (guideReturnReview) setReviewId(guideReturnReview); setGuideReturnReview(null); };
-  const guide = state?.guides?.find(item => item.conceptId === guideConcept?.id);
+  const guide = state?.guides?.find(item => item.conceptId === guideConcept?.id && (item.language ?? 'javascript') === guideLanguage);
   useEffect(() => {
     if (!guide || !guideConcept || pending || busy.current) return;
     const key = `${guideToken}:${guide.version}`;
     if (recordedGuide.current === key) return;
     recordedGuide.current = key;
-    void mutate('guide-open', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/events`, 'POST', { action: 'opened' })));
-  }, [guide, guideConcept, guideToken, pending, mutate, acceptState]);
+    void mutate('guide-open', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/events`, 'POST', { action: 'opened', language: guideLanguage })));
+  }, [guide, guideConcept, guideLanguage, guideToken, pending, mutate, acceptState]);
   useEffect(() => {
     if (waitingForFocus && state?.job?.kind === 'focus' && state.job.status === 'ready' && state.currentLesson?.focus) {
       setGuideConcept(null); setGuideReturnReview(null); setReviewId(null); setView('practice'); setWaitingForFocus(false);
@@ -522,7 +538,7 @@ export default function App() {
   const guideEvent = (action: GuideEvent['action'], close = false) => {
     if (!guideConcept) return;
     void mutate('guide-event', async () => {
-      acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/events`, 'POST', { action }));
+      acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/events`, 'POST', { action, language: guideLanguage }));
       if (close) closeGuide();
     });
   };
@@ -531,7 +547,7 @@ export default function App() {
     void mutate('focus', async () => {
       if (!(await flushReviewSessions())) throw new Error('Review timing is waiting to sync. Reconnect and try again.');
       setWaitingForFocus(true);
-      acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/practice`, 'POST', { length }));
+      acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/practice`, 'POST', { length, language: guideLanguage }));
       setNow(Date.now());
     });
   };
@@ -634,7 +650,7 @@ export default function App() {
             <div className="lesson-progress"><div><span className="eyebrow">{lesson.focus ? 'Focused practice' : `Lesson ${lessonNumber}`}</span><span className="muted">Card {lesson.answered + 1} of {lesson.total}</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.answered} data-testid="lesson-progress"><span style={{ width: `${lesson.answered / lesson.total * 100}%` }} /></div>{lesson.focus && <button className="text-button focus-exit" disabled={Boolean(pending)} onClick={() => void mutate('resume', async () => acceptState(await api<AppState>('/api/lessons/resume', 'POST')))}>Leave practice and return to lesson<ChevronRight size={14} /></button>}</div>
             <div className="card-stack"><div className="card-stack-back" aria-hidden="true" /><article className={`exercise-card ${dragging ? 'dragging' : ''}`} data-testid="exercise-card" data-question-id={state.question.id} style={{ transform: `translateX(${drag}px) rotate(${drag * .055}deg)` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} aria-busy={pending === 'answer'}>
               {drag > 25 && <div className="swipe-stamp correct" data-testid="swipe-correct-overlay">CORRECT</div>}{drag < -25 && <div className="swipe-stamp buggy" data-testid="swipe-buggy-overlay">BUGGY</div>}
-              <div className="exercise-intro"><div className="section-heading"><span className="small-label">Target objective</span><Badge>JavaScript</Badge></div><h1 ref={heading} tabIndex={-1}>{state.question.title}</h1><div className="specification"><p>{state.question.specification}</p></div></div><Code code={state.question.code} /><div className="card-footnote"><span>↔ Drag to decide</span><span>Buggy ← → Correct</span></div>
+              <div className="exercise-intro"><div className="section-heading"><span className="small-label">Target objective</span><Badge>{LANGUAGE_NAMES[state.question.language ?? 'javascript']}</Badge></div><h1 ref={heading} tabIndex={-1}>{state.question.title}</h1><div className="specification"><p>{state.question.specification}</p></div></div><Code code={state.question.code} language={state.question.language} /><div className="card-footnote"><span>↔ Drag to decide</span><span>Buggy ← → Correct</span></div>
             </article></div>
             {previousAnswer}
             <div className="answer-buttons"><button className="answer-button buggy" onClick={() => void submit('buggy')} disabled={answerDisabled} data-testid="answer-buggy"><X size={20} /><span>Buggy</span><kbd>←</kbd></button><button className="answer-button unsure" onClick={() => void submit('idk')} disabled={answerDisabled} data-testid="answer-idk" title="I don’t know · ungraded"><span>IDK</span><kbd>↓</kbd></button><button className="answer-button correct" onClick={() => void submit('correct')} disabled={answerDisabled} data-testid="answer-correct"><Check size={20} /><span>Correct</span><kbd>→</kbd></button></div>
@@ -643,8 +659,8 @@ export default function App() {
             : <>
               {state.job?.status === 'error' && <div className="notice error" role="alert"><strong>{state.job.kind === 'discussion' ? 'Tutor response stopped' : 'Lesson preparation stopped'}</strong><p>{state.job.message}</p><p className="fine-print">{state.job.kind === 'discussion' ? 'Your feedback is saved. Retry or continue to the next lesson.' : 'Check Setup, then retry.'}</p></div>}
               {state.job?.status === 'cancelled' && <div className="notice">{state.job.kind === 'discussion' ? 'Follow-up cancelled. Your feedback is saved.' : 'Planning cancelled. You can try again.'}</div>}
-              {lesson?.complete ? <><div className="lesson-progress"><div><span className="eyebrow">{lesson.focus ? 'Focused practice' : `Lesson ${lessonNumber}`}</span><span className="muted">Complete</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.total} data-testid="lesson-progress"><span style={{ width: '100%' }} /></div></div><LessonComplete key={lesson.id} lesson={lesson} reviews={state.reviews.filter((item) => item.attempt.lessonId === lesson.id)} discussion={state.discussions.filter(item => item.lessonId === lesson.id).at(-1)} job={state.job} pending={pending} canPlan={!connectionError && (Boolean(lesson.focus) || Boolean(chosenProvider?.available))} reflective={state.settings.tutorMode === 'reflective'} onSave={(draft) => void mutate('feedback', () => saveCompletion(draft))} onDiscuss={(draft) => void discussFeedback(draft)} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onNext={(draft) => lesson.focus ? void mutate('resume', async () => { if (discussing) acceptState(await api<AppState>('/api/cancel', 'POST')); await saveCompletion(draft); acceptState(await api<AppState>('/api/lessons/resume', 'POST')); }) : void startLesson(false, draft)} onReview={setReviewId} onNotebook={() => { setSelectedLessonId(lesson.id); changeView('notebook'); }} /></>
-                : <section className="welcome-panel"><Code2 size={38} /><h1 ref={heading} tabIndex={-1}>Read code. Make a call.</h1><p className="welcome-copy">Swipe left for buggy. Right for correct. IDK when you’re unsure.</p><div className="welcome-actions"><button className="button primary" onClick={() => void startLesson(false)} disabled={Boolean(pending) || Boolean(connectionError) || !chosenProvider?.available} data-testid="start-lesson">{pending === 'start' ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{state.job?.status === 'error' ? 'Retry lesson' : 'Start lesson'}<ArrowRight size={18} /></button>{state.settings.provider !== 'demo' && <button className="button quiet" onClick={() => void startLesson(true)} disabled={Boolean(pending) || Boolean(connectionError)} data-testid="try-demo"><FlaskConical size={17} /> Try demo</button>}</div><div className="current-setup"><span>{PROVIDER_NAMES[state.settings.provider]} · {state.settings.batchSize} cards</span><button className="text-button" onClick={() => changeView('settings')}>Setup<ChevronRight size={14} /></button></div>{!chosenProvider?.available && <p className="fine-print">Set up your local agent, or try the demo.</p>}</section>}
+              {lesson?.complete ? <><div className="lesson-progress"><div><span className="eyebrow">{lesson.focus ? 'Focused practice' : `Lesson ${lessonNumber}`}</span><span className="muted">Complete</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.total} data-testid="lesson-progress"><span style={{ width: '100%' }} /></div></div><LessonComplete key={lesson.id} lesson={lesson} reviews={state.reviews.filter((item) => item.attempt.lessonId === lesson.id)} discussion={state.discussions.filter(item => item.lessonId === lesson.id).at(-1)} job={state.job} pending={pending} canPlan={!connectionError && (Boolean(lesson.focus) || Boolean(chosenProvider?.available && chosenLanguage?.available !== false))} reflective={state.settings.tutorMode === 'reflective'} onSave={(draft) => void mutate('feedback', () => saveCompletion(draft))} onDiscuss={(draft) => void discussFeedback(draft)} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onNext={(draft) => lesson.focus ? void mutate('resume', async () => { if (discussing) acceptState(await api<AppState>('/api/cancel', 'POST')); await saveCompletion(draft); acceptState(await api<AppState>('/api/lessons/resume', 'POST')); }) : void startLesson(false, draft)} onReview={setReviewId} onNotebook={() => { setSelectedLessonId(lesson.id); changeView('notebook'); }} /></>
+                : <section className="welcome-panel"><Code2 size={38} /><h1 ref={heading} tabIndex={-1}>Read code. Make a call.</h1><p className="welcome-copy">Swipe left for buggy. Right for correct. IDK when you’re unsure.</p><div className="welcome-actions"><button className="button primary" onClick={() => void startLesson(false)} disabled={Boolean(pending) || Boolean(connectionError) || (!chosenProvider?.available || chosenLanguage?.available === false)} data-testid="start-lesson">{pending === 'start' ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{state.job?.status === 'error' ? 'Retry lesson' : 'Start lesson'}<ArrowRight size={18} /></button>{state.settings.provider !== 'demo' && <button className="button quiet" onClick={() => void startLesson(true)} disabled={Boolean(pending) || Boolean(connectionError) || chosenLanguage?.available === false} data-testid="try-demo"><FlaskConical size={17} /> Try demo</button>}</div><div className="current-setup"><span>{PROVIDER_NAMES[state.settings.provider]} · {LANGUAGE_NAMES[state.settings.language ?? 'javascript']} · {state.settings.batchSize} cards</span><button className="text-button" onClick={() => changeView('settings')}>Setup<ChevronRight size={14} /></button></div>{!chosenProvider?.available && <p className="fine-print">Set up your local agent, or try the demo.</p>}{chosenLanguage?.available === false && <p className="fine-print">Open Setup to finish preparing the {LANGUAGE_NAMES[state.settings.language ?? 'javascript']} sandbox.</p>}</section>}
             </>}
           {!state.question && previousAnswer}
         </div></div>}
@@ -655,7 +671,7 @@ export default function App() {
         <div><span>Previous answer</span><strong>{quickResultLabel(answerFeedback.correct)}</strong></div>
       </div>}
     </div>
-    {review && <ReviewDialog key={review.attempt.id} review={review} pending={Boolean(pending) || running} error={error || connectionError} onFlag={flag} onGuide={openGuide} onClose={() => setReviewId(null)} />}
-    {guideConcept && <GuideDialog key={guideToken} concept={guideConcept} guide={guide} job={state?.job ?? null} pending={Boolean(pending)} error={error || connectionError} canPractice={Boolean(state?.currentLesson && !state.currentLesson.focus) && (state?.settings.provider !== 'demo' || guideConcept.id === 'demo-code-review')} onClose={closeGuide} onDone={() => guideEvent('finished', true)} onReport={action => guideEvent(action)} onPractice={focusPractice} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onRetry={() => void mutate('guide', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/guide`, 'POST')))} />}
+    {review && <ReviewDialog key={review.attempt.id} review={review} pending={Boolean(pending) || running} error={error || connectionError} onFlag={flag} onGuide={concept => openGuide(concept, review.language ?? 'javascript')} onClose={() => setReviewId(null)} />}
+    {guideConcept && <GuideDialog key={guideToken} concept={guideConcept} language={guideLanguage} guide={guide} job={state?.job ?? null} pending={Boolean(pending)} error={error || connectionError} canPractice={Boolean(state?.currentLesson && !state.currentLesson.focus) && (state?.settings.provider !== 'demo' || ['demo-code-review', 'python-demo-code-review'].includes(guideConcept.id))} onClose={closeGuide} onDone={() => guideEvent('finished', true)} onReport={action => guideEvent(action)} onPractice={focusPractice} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onRetry={() => void mutate('guide', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/guide`, 'POST', { language: guideLanguage })))} />}
   </div>;
 }
