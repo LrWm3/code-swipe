@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalStore } from '../server/store.ts';
 import { TutorService } from '../server/service.ts';
-import { parseGuide, reviewedGuide } from '../server/concept-guides.ts';
+import { guidePrompt, parseGuide, reviewedGuide } from '../server/concept-guides.ts';
 import { buildTutorPrompt } from '../server/prompts.ts';
 import { createDemoLesson } from '../server/demo.ts';
 import { validateLesson } from '../server/validation.ts';
@@ -127,6 +127,20 @@ test('given a generated guide, when examples are checked in the sandbox, then in
   await assert.rejects(parseGuide(JSON.stringify({ ...input, examples: [{ ...input.examples[0], expectedJson: '4' }] }), concept), /did not produce/);
   await assert.rejects(parseGuide(JSON.stringify({ ...input, links: ['https://example.com'] }), concept), /invalid|unknown|extra|not allowed/i);
   await assert.rejects(parseGuide(JSON.stringify({ ...input, examples: [{ ...input.examples[0], expression: 'process.exit()' }] }), concept), /did not produce/);
+});
+
+test('given a multiline JavaScript guide, when checking statements, then the displayed result must match the code', async () => {
+  const concept: GuideConcept = { id: 'loops', name: 'Loops', description: 'Visit each item in a list.' };
+  const example = { mode: 'statements', expression: 'const result = [];\nfor (const number of [1, 2, 3]) {\n  result.push(number);\n}', expectedJson: '[1,2,3]', explanation: 'Each number is added.' };
+  const input = { title: 'Loops', description: 'A loop visits each item.', takeaway: 'The body runs once per item.', examples: [example] };
+  const guide = await parseGuide(JSON.stringify(input), concept);
+  assert.equal(guide.examples[0].mode, 'statements');
+  assert.equal(guide.examples[0].expression, example.expression);
+  assert.deepEqual(guide.examples[0].result, [1, 2, 3]);
+  await assert.rejects(parseGuide(JSON.stringify({ ...input, examples: [{ ...example, expectedJson: '[1,2]' }] }), concept), /did not produce/);
+  await assert.rejects(parseGuide(JSON.stringify({ ...input, examples: [{ ...example, expression: 'const result = process.exit();' }] }), concept), /did not produce/);
+  assert.match(guidePrompt(concept), /directly demonstrate the concept/);
+  assert.match(guidePrompt(concept), /Avoid using a more advanced or unrelated feature/);
 });
 
 test('given reviewed guides, when running their examples, then each stated result agrees with JavaScript', async () => {

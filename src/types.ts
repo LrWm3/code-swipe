@@ -177,7 +177,7 @@ export interface ConceptGuide {
   createdAt: string;
   title: string;
   description: string;
-  examples: { expression: string; result: JsonValue; explanation: string }[];
+  examples: { expression: string; mode?: 'expression' | 'statements'; result: JsonValue; explanation: string }[];
   takeaway: string;
   links: { title: string; url: string }[];
 }

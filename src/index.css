@@ -363,6 +363,8 @@ td { color: #b1bac4; }
 .guide-examples { display: grid; gap: 14px; margin: 18px 0; }
 .guide-example { border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
 .guide-example .code-block { border: 0; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px 15px; }
+.guide-result { padding: 9px 15px 0; font-size: .75rem; color: var(--muted); }
+.guide-result code { color: #a5d6ff; font-family: var(--mono); overflow-wrap: anywhere; }
 .guide-example p { padding: 10px 15px; font-size: .8rem; }
 .guide-takeaway { margin: 18px 0; }
 .guide-link { color: var(--blue); display: block; margin-top: 8px; }

@@ -124,3 +124,16 @@ test('given JavaScript and Python guides for one concept, when saving or recordi
   assert.equal(result.examples[0].result, 5);
   assert.match(result.links[0].url, /^https:\/\/docs\.python\.org\//);
 });
+
+test('given a Python scan guide, when checking multiline examples, then indentation and their actual results are preserved', sandbox, async () => {
+  const concept = { id: 'python_scan_representation', name: 'Reading Python scans', description: 'Read loops and their indentation.' };
+  const curated = reviewedGuide(concept, 'python')!;
+  const input = { title: curated.title, description: curated.description, takeaway: curated.takeaway,
+    examples: curated.examples.map(example => ({ mode: example.mode, expression: example.expression, expectedJson: JSON.stringify(example.result), explanation: example.explanation })) };
+  const checked = await parseGuide(JSON.stringify(input), concept, undefined, 'python');
+  assert.equal(checked.examples[0].mode, 'statements');
+  assert.match(checked.examples[1].expression, /\n    if number > 1:\n        result\.append\(number\)/);
+  assert.deepEqual(checked.examples.map(example => example.result), [[1, 2, 3], [2, 3]]);
+  input.examples[1].expectedJson = '[1,2,3]';
+  await assert.rejects(parseGuide(JSON.stringify(input), concept, undefined, 'python'), /did not produce/);
+});
