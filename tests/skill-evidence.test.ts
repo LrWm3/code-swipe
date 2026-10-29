@@ -89,15 +89,15 @@ test('given misleading skill mappings, when validating new plans, then missing r
   assert.throws(() => validateSkillUses([use('a', 'target', { ifIncorrect: 'challenges' }), use('b', 'target', { ifIncorrect: 'challenges' })]), /multiple skills/);
 });
 
-test('given correct but inconclusive or scaffolded history, when claiming familiarity, then raw successes cannot satisfy evidence requirements', () => {
+test('given supported scaffolded history, when claiming familiarity, then support counts while inconclusive answers do not', () => {
   for (const kind of ['independent', 'scaffolded', 'inconclusive'] as const) {
     const data = archive(Array.from({ length: 3 }, () => [use('old', 'target', kind === 'inconclusive' ? { ifCorrect: 'inconclusive' } : { support: kind })]));
     const tutor = context();
     tutor.curriculum = buildCurriculumMemory(data);
     const proposal = createDemoLesson(tutor);
     proposal.curriculum!.conceptUpdates.push({ ...definition('old'), familiarity: 'familiar', evidenceAttemptIds: ['a0', 'a1', 'a2'] });
-    if (kind === 'independent') assert.doesNotThrow(() => validateCurriculum(proposal, tutor));
-    else assert.throws(() => validateCurriculum(proposal, tutor), /planned independent supporting/);
+    if (kind === 'inconclusive') assert.throws(() => validateCurriculum(proposal, tutor), /planned supporting/);
+    else assert.doesNotThrow(() => validateCurriculum(proposal, tutor));
   }
 });
 
@@ -113,7 +113,7 @@ test('given retrospective success across several lessons, when assessing familia
     if (includeHistory) tutor.history = data.lessons.map(lesson => ({ lesson, attempts: data.attempts.filter(attempt => attempt.lessonId === lesson.id) }));
     const proposal = createDemoLesson(tutor);
     proposal.curriculum!.conceptUpdates.push({ ...definition('old'), familiarity: 'familiar', evidenceAttemptIds: ['a0', 'a1', 'a2'] });
-    assert.throws(() => validateCurriculum(proposal, tutor), /planned independent supporting/);
+    assert.throws(() => validateCurriculum(proposal, tutor), /planned supporting/);
   }
 });
 

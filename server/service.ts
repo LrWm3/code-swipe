@@ -62,18 +62,23 @@ export class TutorService {
     };
     this.work = (async () => {
       try {
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const proposal = context.settings.provider === 'demo' ? (context.settings.language === 'python' ? createPythonDemoLesson(context) : createDemoLesson(context)) : await this.generate(context, { signal: controller.signal, onProgress: progress });
+        const maxRepairs = context.settings.provider === 'demo' ? 0 : 3;
+        const earlierFailures: string[] = [];
+        for (let attempt = 0; attempt <= maxRepairs; attempt++) {
+          const repairMessage = `A check failed. Asking the tutor to repair the lesson (${attempt} of ${maxRepairs})…`;
+          const proposal = context.settings.provider === 'demo' ? (context.settings.language === 'python' ? createPythonDemoLesson(context) : createDemoLesson(context)) : await this.generate(context, { signal: controller.signal, onProgress: message => progress(attempt ? repairMessage : message, attempt ? 'repairing' : 'planning') });
           if (!active()) return;
           progress(`Running every fixture in the isolated ${language === 'python' ? 'Python' : 'JavaScript'} sandbox…`, 'validating');
           let validated: Awaited<ReturnType<typeof validateLesson>>;
           try { validated = await validateLesson(proposal, context, controller.signal); }
           catch (error) {
             if (!active()) return;
-            if (attempt || context.settings.provider === 'demo') throw new Error(`The lesson failed validation. No exercises were published. ${error instanceof Error ? error.message : 'Try again.'}`);
-            context.repair = [error instanceof Error ? error.message : 'Invalid lesson.'];
+            const failure = error instanceof Error ? error.message : 'Invalid lesson.';
+            if (attempt >= maxRepairs) throw new Error(`The lesson failed validation after ${maxRepairs} repair attempts. No exercises were published. Last check: ${failure}`);
+            context.repair = [failure, ...earlierFailures.map(item => `Earlier check (may already be fixed): ${item}`)];
+            earlierFailures.push(failure);
             context.draft = proposal;
-            progress('A check failed. Asking the tutor to repair this lesson…', 'repairing');
+            progress(`A check failed. Asking the tutor to repair the lesson (${attempt + 1} of ${maxRepairs})…`, 'repairing');
             continue;
           }
           if (!active()) return;

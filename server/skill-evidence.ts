@@ -41,13 +41,17 @@ export function interpretSkill(use: SkillUse, source: SkillEvidence['source'], a
       : attempt.correct ? use.ifCorrect : use.role === 'target' ? use.ifIncorrect : 'inconclusive' };
 }
 
+export function supportingEvidence(evidence: Partial<SkillEvidence> & { correct?: boolean | null }): boolean {
+  return evidence.correct !== false && evidence.correct !== null && evidence.signal === 'supports' && (evidence.role === 'target' || evidence.role === 'exercised');
+}
+
 export function independentSupport(evidence: Partial<SkillEvidence> & { correct?: boolean | null }): boolean {
-  return evidence.correct !== false && evidence.correct !== null && evidence.signal === 'supports' && evidence.support === 'independent' && evidence.role !== 'incidental';
+  return supportingEvidence(evidence) && evidence.support === 'independent';
 }
 
 export function familiaritySupport(evidence: Partial<SkillEvidence> & { correct?: boolean | null }): boolean {
   // Retrospective interpretation helps planning, but is not a precommitted assessment.
-  return independentSupport(evidence) && evidence.source === 'planned';
+  return supportingEvidence(evidence) && evidence.source === 'planned';
 }
 
 export function validateRetrofit(retrofit: SkillRetrofit, data: StoreData, checkArchive = true): void {

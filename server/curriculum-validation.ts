@@ -1,5 +1,5 @@
 import type { ConceptUpdate, ProposedLesson, ProposedQuestion, QuestionPlan, TutorContext } from '../src/types.ts';
-import { questionSkills, interpretSkill, independentSupport, familiaritySupport, validateSkillUses } from './skill-evidence.ts';
+import { questionSkills, interpretSkill, supportingEvidence, familiaritySupport, validateSkillUses } from './skill-evidence.ts';
 
 export class CurriculumValidationError extends Error {
   constructor(path: string, detail: string) {
@@ -33,7 +33,7 @@ interface Evidence {
   correct: boolean | null;
   conceptIds: Set<string>;
   legacy: boolean;
-  independentIds: Set<string>;
+  supportingIds: Set<string>;
   familiarIds: Set<string>;
 }
 
@@ -74,7 +74,7 @@ function priorState(context: TutorContext): PriorState {
         correct: attempt.answer === 'idk' ? null : attempt.correct,
         conceptIds: new Set(skills.map(skill => skill.id)),
         legacy: !question.plan,
-        independentIds: new Set(skills.filter(independentSupport).map(skill => skill.id)),
+        supportingIds: new Set(skills.filter(supportingEvidence).map(skill => skill.id)),
         familiarIds: new Set(skills.filter(familiaritySupport).map(skill => skill.id)),
       });
     }
@@ -91,7 +91,7 @@ function priorState(context: TutorContext): PriorState {
       }
       if (previous) {
         previous.conceptIds.add(concept.id);
-        if (independentSupport(evidence)) previous.independentIds.add(concept.id);
+        if (supportingEvidence(evidence)) previous.supportingIds.add(concept.id);
         if (familiaritySupport(evidence)) previous.familiarIds.add(concept.id);
       }
       else state.evidence.set(evidence.attemptId, {
@@ -99,7 +99,7 @@ function priorState(context: TutorContext): PriorState {
         correct: evidence.answer === 'idk' ? null : evidence.correct,
         conceptIds: new Set([concept.id]),
         legacy: false,
-        independentIds: new Set(independentSupport(evidence) ? [concept.id] : []),
+        supportingIds: new Set(supportingEvidence(evidence) ? [concept.id] : []),
         familiarIds: new Set(familiaritySupport(evidence) ? [concept.id] : []),
       });
     }
@@ -237,7 +237,7 @@ export function validateCurriculum(lesson: ProposedLesson, context: TutorContext
     if (concept.familiarity !== 'unknown' && !evidence.length) reject(`${path}.familiarity`, 'introduced, developing, and familiar claims require cited prior evidence; otherwise use unknown.');
     if (concept.familiarity === 'familiar') {
       const correct = evidence.filter(item => item.familiarIds.has(concept.id));
-      if (correct.length < 3 || new Set(correct.map(item => item.lessonId)).size < 2) reject(`${path}.familiarity`, 'familiar requires at least 3 cited correct judgments with planned independent supporting evidence across at least 2 previous lessons.');
+      if (correct.length < 3 || new Set(correct.map(item => item.lessonId)).size < 2) reject(`${path}.familiarity`, 'familiar requires at least 3 cited correct judgments with planned supporting evidence across at least 2 previous lessons. Scaffolded evidence still reflects the support provided.');
     }
   }
 
@@ -267,6 +267,7 @@ export function validateCurriculum(lesson: ProposedLesson, context: TutorContext
   const purposes = new Set<string>();
   const targets = new Set<string>();
   const earlier = new Set<string>();
+  const missingPrerequisites: string[] = [];
   const families = new Map<string, number[]>();
   const stageOrder = { warmup: 0, build: 1, stretch: 2, consolidate: 3 };
   let previous: QuestionPlan | undefined;
@@ -310,13 +311,17 @@ export function validateCurriculum(lesson: ProposedLesson, context: TutorContext
       }
       for (const id of [...plan.conceptIds, ...plan.prerequisiteIds]) gather(id);
       for (const id of prerequisites) {
-        const demonstrated = [...prior.evidence.values()].some(entry => entry.independentIds.has(id));
-        if (!demonstrated && !earlier.has(id) && !suppliedScaffolding(question, definitions.get(id)!)) reject(`${path}.prerequisiteIds`, `stretch prerequisite "${id}" needs prior demonstrated evidence, earlier preparation, or explicit scaffolding on this card.`);
+        const supported = [...prior.evidence.values()].some(entry => entry.supportingIds.has(id));
+        if (!supported && !earlier.has(id) && !suppliedScaffolding(question, definitions.get(id)!)) missingPrerequisites.push(`${path}.prerequisiteIds: stretch prerequisite "${id}" needs prior supporting evidence (including scaffolded success), earlier preparation, or explicit scaffolding on this card`);
       }
     }
     for (const id of plan.conceptIds) earlier.add(id);
+    // Meaningfully using a skill in an earlier card provides preparation, not
+    // evidence that the learner has already understood it.
+    for (const use of plan.skillUses ?? []) if (use.role === 'exercised') earlier.add(use.conceptId);
     previous = plan;
   }
+  if (missingPrerequisites.length) reject('questions', `${missingPrerequisites.slice(0, 16).join('; ')}${missingPrerequisites.length > 16 ? '; additional prerequisites also need preparation' : ''}.`);
   if (!hasBuild || previous?.stage !== 'consolidate' || warmups > Math.ceil(lesson.questions.length / 3)) reject('questions.plan.stage', 'include a brief contiguous warmup (at most ceil(batchSize/3)), build, and final consolidation.');
   if (purposes.size < 2 || !['practice', 'introduction', 'transfer'].some(purpose => purposes.has(purpose)) || !['diagnostic', 'frontier', 'robustness', 'calibration', 'strategy-evaluation'].some(purpose => purposes.has(purpose)) || !purposes.has('transfer')) {
     reject('questions.plan.purposes', 'include teaching, investigation, and at least one transfer opportunity across the batch.');

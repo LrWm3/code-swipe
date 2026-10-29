@@ -96,7 +96,7 @@ test('given an invalid first proposal, when one repair returns a valid lesson, t
   assert.equal(service.state().reviews.length, 0);
 });
 
-test('given two invalid proposals, when the one permitted repair also fails, then no plan is published and further automatic retries stop', async t => {
+test('given repeated invalid proposals, when all permitted repairs fail, then no plan is published and retries stop', async t => {
   const store = temporaryStore(t);
   let calls = 0;
   const service = new TutorService(store, AVAILABLE, async context => {
@@ -107,12 +107,32 @@ test('given two invalid proposals, when the one permitted repair also fails, the
   });
   service.plan();
   await service.settled();
-  assert.equal(calls, 2);
+  assert.equal(calls, 4);
   assert.equal(service.job?.status, 'error');
   assert.match(service.job!.message, /failed validation.*No exercises were published/);
   assert.deepEqual(store.snapshot().lessons, []);
   assert.equal(service.state().question, null);
   assert.deepEqual(readdirSync(join(store.directory, 'plans')), []);
+});
+
+test('given different validation failures, when successive repairs resolve them, then the tutor receives feedback and publishes only the checked plan', async t => {
+  const store = temporaryStore(t);
+  const contexts: TutorContext[] = [];
+  const service = new TutorService(store, AVAILABLE, async context => {
+    contexts.push(structuredClone(context));
+    assert.equal(store.snapshot().lessons.length, 0);
+    const proposal = createDemoLesson(context);
+    if (contexts.length === 1) proposal.questions[0].verdict = 'correct';
+    if (contexts.length === 2) proposal.questions[1].verdict = 'buggy';
+    return proposal;
+  });
+  service.plan(); await service.settled();
+  assert.equal(contexts.length, 3);
+  assert.match(contexts[1].repair![0], /labelled correct but failed/);
+  assert.match(contexts[2].repair![0], /labelled buggy/);
+  assert.match(contexts[2].repair![1], /Earlier check.*labelled correct/);
+  assert.equal(service.job?.status, 'ready');
+  assert.equal(store.snapshot().lessons.length, 1);
 });
 
 test('given a provider failure, when lesson generation rejects, then the error remains visible without retrying or silently publishing demo exercises', async t => {

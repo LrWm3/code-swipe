@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mirrors, validateCurriculum } from '../server/curriculum-validation.ts';
+import { independentSupport } from '../server/skill-evidence.ts';
 import type { ConceptRecord, ConceptUpdate, Lesson, ProposedLesson, TutorContext } from '../src/types.ts';
 
 function context(batchSize = 8): TutorContext {
@@ -306,6 +307,58 @@ test('given prior correct prerequisite evidence, when stretching without earlier
   assert.doesNotThrow(() => validateCurriculum(proposal, tutor));
   prior.evidence[0].correct = false;
   assert.throws(() => validateCurriculum(proposal, tutor), /stretch prerequisite/);
+});
+
+test('given scaffolded successes, when assessing stretch prerequisites, then supported evidence counts without becoming independent evidence', () => {
+  const tutor = context();
+  const prior = memory(tutor, [{ ...evidence(), support: 'scaffolded' }], 'integer-order'); prior.name = 'Integer order';
+  const proposal = lesson(); observe(proposal, ['attempt-1'], ['integer-order']);
+  proposal.questions[4].plan!.prerequisiteIds = ['integer-order'];
+  proposal.questions[4].plan!.skillUses!.push({ ...proposal.questions[4].plan!.skillUses![0], conceptId: 'integer-order', role: 'exercised' });
+  assert.doesNotThrow(() => validateCurriculum(proposal, tutor));
+  assert.equal(independentSupport(prior.evidence[0]), false);
+  prior.evidence[0].signal = 'inconclusive';
+  assert.throws(() => validateCurriculum(proposal, tutor), /stretch prerequisite/);
+});
+
+test('given recent scaffolded success, when checking prerequisites, then the original unflagged answer supports readiness', () => {
+  const tutor = context();
+  memory(tutor, [{ ...evidence(), support: 'scaffolded' }], 'integer-order').name = 'Integer order';
+  history(tutor);
+  const previous = tutor.history[0].lesson.questions[0].plan!;
+  previous.familyId = 'previous-order-example';
+  previous.conceptIds = ['integer-order'];
+  previous.skillUses = [{ ...previous.skillUses![0], conceptId: 'integer-order', support: 'scaffolded' }];
+  const proposal = lesson(); observe(proposal, ['attempt-1'], ['integer-order']);
+  proposal.questions[4].plan!.prerequisiteIds = ['integer-order'];
+  proposal.questions[4].plan!.skillUses!.push({ ...proposal.questions[4].plan!.skillUses![0], conceptId: 'integer-order', role: 'exercised' });
+  assert.doesNotThrow(() => validateCurriculum(proposal, tutor));
+  tutor.history[0].attempts[0].flagged = true;
+  proposal.curriculum!.observations = [];
+  assert.throws(() => validateCurriculum(proposal, tutor), /stretch prerequisite/);
+});
+
+test('given an earlier card that exercises a prerequisite, when planning a stretch, then meaningful practice counts but incidental presence does not', () => {
+  const proposal = lesson();
+  proposal.curriculum!.conceptUpdates.push(concept('integer-order', 'Integer order'));
+  proposal.questions[1].plan!.skillUses!.push({ ...proposal.questions[1].plan!.skillUses![0], conceptId: 'integer-order', role: 'exercised' });
+  proposal.questions[4].plan!.prerequisiteIds = ['integer-order'];
+  proposal.questions[4].plan!.skillUses!.push({ ...proposal.questions[4].plan!.skillUses![0], conceptId: 'integer-order', role: 'exercised' });
+  assert.doesNotThrow(() => validateCurriculum(proposal, context()));
+  Object.assign(proposal.questions[1].plan!.skillUses![1], { role: 'incidental', ifCorrect: 'inconclusive' });
+  assert.throws(() => validateCurriculum(proposal, context()), /stretch prerequisite/);
+});
+
+test('given several unprepared prerequisites, when validating a lesson, then feedback reports each for one repair', () => {
+  const proposal = lesson();
+  proposal.curriculum!.conceptUpdates.push(concept('integer-order', 'Integer order'), concept('signed-change', 'Signed change'));
+  proposal.questions[4].plan!.prerequisiteIds = ['integer-order', 'signed-change'];
+  proposal.questions[4].plan!.skillUses!.push(...['integer-order', 'signed-change'].map(conceptId => ({ ...proposal.questions[4].plan!.skillUses![0], conceptId, role: 'exercised' as const })));
+  assert.throws(() => validateCurriculum(proposal, context()), error => {
+    assert.match(String(error), /integer-order/);
+    assert.match(String(error), /signed-change/);
+    return true;
+  });
 });
 
 test('given a target with an unlisted dependency chain, when stretching, then concept definitions also establish required prerequisites', () => {
