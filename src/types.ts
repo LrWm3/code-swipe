@@ -355,7 +355,8 @@ export interface DiscussionContext {
   discussions: Discussion[];
 }
 export interface StoreData {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
+  learning?: LearningJourney;
   organizationMigration?: { fromVersion: 2; at: string; backupDirectory: string; classifiedIds: string[]; addedIds: string[] };
   knowledgeSeed?: Pick<KnowledgeGraph, 'concepts' | 'contexts' | 'relationships'>;
   graphRevisions?: GraphRevision[];
@@ -368,7 +369,7 @@ export interface StoreData {
   discussions?: Discussion[];
   skillRetrofits?: SkillRetrofit[];
   presentationRevisions?: PresentationRevision[];
-  activeLessonId?: string;
+  activeLessonId?: string | null;
   startedLessonIds?: string[];
   endedFocusIds?: string[];
   guides?: ConceptGuide[];
@@ -394,6 +395,8 @@ export interface PresentationRevision {
 }
 export interface ProviderStatus { id: ProviderId; available: boolean; version: string; detail: string }
 export interface TutorContext {
+  curriculumHistory?: { title: string; goal: string; completedAt?: string; laterChecks: string[]; summary?: string }[];
+  learningPlan?: { arcId: string; title: string; goal: string; outcomes: LearningOutcome[]; step: LearningStep; remaining: LearningStep[]; finishWhen: string; laterChecks: string[]; recentReview?: ArcReview };
   knowledge?: KnowledgeGraph;
   environments?: ExecutionEnvironment[];
   settings: Settings;
@@ -418,7 +421,7 @@ export interface Job {
   stage: string;
   startedAt: string;
   message: string;
-  kind?: 'lesson' | 'discussion' | 'guide' | 'focus';
+  kind?: 'lesson' | 'discussion' | 'guide' | 'focus' | 'directions' | 'curriculum' | 'progress';
   lessonId?: string;
   conceptId?: string;
   language?: Language;
@@ -479,6 +482,7 @@ export interface LessonSummary {
   endedEarly?: boolean;
 }
 export interface AppState {
+  learning?: LearningJourney;
   contexts?: LearningContext[];
   environments?: ExecutionEnvironment[];
   knowledge?: KnowledgeGraph;
@@ -499,4 +503,72 @@ export interface AppState {
   reviewSessions: ReviewSession[];
   feedback: LessonFeedback[];
   discussions: Discussion[];
+}
+
+export interface LearningDirection {
+  id: string;
+  title: string;
+  summary: string;
+  goal: string;
+  why: string;
+  novelty: string;
+  contexts: string[];
+  preview: { description: string; example: string; explanation: string; links: { title: string; url: string }[] };
+}
+export interface DirectionProposal {
+  options: LearningDirection[];
+  recommendedId: string;
+  recommendation: string;
+}
+export interface DirectionSet extends DirectionProposal {
+  id: string;
+  createdAt: string;
+  provider: ProviderId;
+  model: string;
+  selectedId?: string;
+}
+export interface LearningOutcome { id: string; description: string; evidence: string }
+export interface LearningStep {
+  id: string;
+  title: string;
+  objective: string;
+  ideas: string[];
+  role: 'introduce' | 'develop' | 'connect' | 'apply' | 'consolidate';
+  teaching: string;
+  successEvidence: string;
+}
+export interface LearningPlan {
+  title: string;
+  goal: string;
+  outcomes: LearningOutcome[];
+  lessons: LearningStep[];
+  finishWhen: string;
+  laterChecks: string[];
+}
+export interface ArcReview {
+  decision: 'continue' | 'complete';
+  summary: string;
+  reason: string;
+  outcomes: { outcomeId: string; status: 'not-yet' | 'emerging' | 'demonstrated'; attemptIds: string[]; explanation: string }[];
+  remainingLessons: LearningStep[];
+  investigations: { description: string; attemptIds: string[]; alternativeExplanation: string }[];
+  retention: string;
+}
+export interface LearningArc {
+  id: string;
+  createdAt: string;
+  status: 'active' | 'complete' | 'legacy';
+  direction: LearningDirection | null;
+  plan: LearningPlan;
+  lessons: { lessonId: string; stepId: string; revision: number }[];
+  revisions: { id: string; createdAt: string; afterLessonId: string; evidenceHash: string; review: ArcReview }[];
+  completedAt?: string;
+}
+export interface LearningJourney {
+  version: 1;
+  activeArcId: string | null;
+  directions: DirectionSet | null;
+  arcs: LearningArc[];
+  cancelledLessonIds: string[];
+  migratedAt: string;
 }

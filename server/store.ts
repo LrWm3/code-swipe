@@ -15,6 +15,8 @@ import { migrateKnowledge } from './knowledge-migration.ts';
 import { executionEnvironments } from './environments.ts';
 import { migrateOrganization } from './organization-migration.ts';
 import { knowledgeKind, teachingAnchor } from '../src/knowledge-organization.ts';
+import { activeArc, arcEvidenceHash, migrateLearning, parseDirections, parseLearningPlan, parseArcReview, remainingSteps } from './learning-journey.ts';
+import type { ArcReview, DirectionProposal, LearningPlan } from '../src/types.ts';
 
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -84,7 +86,7 @@ export class LocalStore {
     if (existsSync(this.file)) {
       try {
         this.data = JSON.parse(readFileSync(this.file, 'utf8'));
-        if (![1, 2, 3].includes(this.data.version) || !Array.isArray(this.data.lessons) || !Array.isArray(this.data.attempts)) throw new Error('Unsupported data format.');
+        if (![1, 2, 3, 4].includes(this.data.version) || !Array.isArray(this.data.lessons) || !Array.isArray(this.data.attempts)) throw new Error('Unsupported data format.');
         // Retire the old four-card setting without changing any sealed lesson.
         if (this.data.settings?.batchSize === 4) this.data.settings = { ...this.data.settings, batchSize: DEFAULT_LESSON_SIZE };
         this.data.settings = parseSettings(this.data.settings);
@@ -131,17 +133,70 @@ export class LocalStore {
           this.data = migrateOrganization(this.data, backupDirectory).data;
           this.persist();
         }
+        if (this.data.version === 3) {
+          const backupDirectory = join(this.directory, 'backups', `curricula-v3-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+          mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+          copyFileSync(this.file, join(backupDirectory, 'state.json'));
+          cpSync(join(this.directory, 'plans'), join(backupDirectory, 'plans'), { recursive: true });
+          this.data = migrateLearning(this.data);
+          this.persist();
+        }
+        if (!this.data.learning || this.data.learning.version !== 1) throw new Error('Missing curriculum history.');
         buildKnowledgeGraph(this.data);
       } catch (error) {
         throw new Error(`Could not read local history at ${this.file}. Nothing was reset. Check state.backup.json and restore a matching set of plan files. ${error instanceof Error ? error.message : ''}`);
       }
     } else {
-      this.data = { version: 3, settings: parseSettings(DEFAULT_SETTINGS), lessons: [], attempts: [], feedback: [], reviewSessions: [], discussions: [], graphRevisions: [] };
+      this.data = migrateLearning({ version: 3, settings: parseSettings(DEFAULT_SETTINGS), lessons: [], attempts: [], feedback: [], reviewSessions: [], discussions: [], graphRevisions: [] });
       this.persist();
     }
   }
 
   snapshot(): StoreData { return structuredClone(this.data); }
+
+  saveDirections(proposal: DirectionProposal): void {
+    if (this.pendingQuestion() || activeArc(this.data.learning)) throw new AppError('Finish the current curriculum before choosing another direction.', 409);
+    const checked = parseDirections(JSON.stringify(proposal));
+    this.update({ ...this.data, activeLessonId: null, learning: { ...this.data.learning!, directions: { ...checked, id: randomUUID(), createdAt: new Date().toISOString(), provider: this.data.settings.provider, model: this.data.settings.model } } });
+  }
+
+  beginCurriculum(directionSetId: string, directionId: string, plan: LearningPlan): void {
+    const learning = this.data.learning!;
+    const directions = learning.directions;
+    const direction = directions?.options.find(item => item.id === directionId);
+    if (!directions || directions.id !== directionSetId || !direction || activeArc(learning) || this.pendingQuestion()) throw new AppError('These choices are no longer current. Refresh to continue.', 409);
+    const checked = parseLearningPlan(JSON.stringify(plan));
+    const arc = { id: randomUUID(), createdAt: new Date().toISOString(), status: 'active' as const, direction, plan: checked, lessons: [], revisions: [] };
+    this.update({ ...this.data, activeLessonId: null, learning: { ...learning, activeArcId: arc.id, directions: { ...directions, selectedId: directionId }, arcs: [...learning.arcs, arc] } });
+  }
+
+  reviewCurriculum(arcId: string, proposal: ArcReview): void {
+    const arc = activeArc(this.data.learning);
+    if (!arc || arc.id !== arcId || this.pendingQuestion() || !arc.lessons.length) throw new AppError('Finish the current lesson before reviewing this curriculum.', 409);
+    const review = parseArcReview(JSON.stringify(proposal), arc, this.context());
+    const at = new Date().toISOString();
+    const revised = { ...arc, revisions: [...arc.revisions, { id: randomUUID(), createdAt: at, afterLessonId: arc.lessons.at(-1)!.lessonId, evidenceHash: arcEvidenceHash(this.data, arc), review }],
+      ...(review.decision === 'complete' ? { status: 'complete' as const, completedAt: at } : {}) };
+    this.update({ ...this.data, activeLessonId: null, learning: { ...this.data.learning!, arcs: this.data.learning!.arcs.map(item => item.id === arcId ? revised : item),
+      ...(review.decision === 'complete' ? { activeArcId: null, directions: null } : {}) } });
+  }
+
+  restartAtDirections(): void {
+    if (activeArc(this.data.learning)) throw new AppError('A new curriculum has already started.', 409);
+    const current = this.activeLesson();
+    const remove = current && !this.data.attempts.some(item => item.lessonId === current.id) ? current.id : null;
+    const backupDirectory = join(this.directory, 'backups', `restart-learning-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    copyFileSync(this.file, join(backupDirectory, 'state.json'));
+    cpSync(join(this.directory, 'plans'), join(backupDirectory, 'plans'), { recursive: true });
+    const next: StoreData = { ...this.data, activeLessonId: null,
+      lessons: this.data.lessons.filter(item => item.id !== remove), graphRevisions: this.data.graphRevisions?.filter(item => item.lessonId !== remove),
+      startedLessonIds: this.data.startedLessonIds?.filter(id => id !== remove),
+      learning: { ...this.data.learning!, directions: null, cancelledLessonIds: [...new Set([...this.data.learning!.cancelledLessonIds, ...(remove ? [remove] : [])])],
+        arcs: this.data.learning!.arcs.map(arc => ({ ...arc, lessons: arc.lessons.filter(link => link.lessonId !== remove) })) } };
+    buildKnowledgeGraph(next);
+    this.update(next);
+  }
 
   importSkillRetrofit(retrofit: SkillRetrofit): boolean {
     const existing = this.data.skillRetrofits?.find(item => item.id === retrofit.id);
@@ -264,11 +319,12 @@ export class LocalStore {
     const parsed = parseSettings(settings);
     // Older clients still send a single language selection.
     if (settings.language && settings.language !== this.data.settings.language && JSON.stringify(settings.preferredContexts) === JSON.stringify(this.data.settings.preferredContexts)) parsed.preferredContexts = [settings.language];
-    this.update({ ...this.data, settings: parsed });
+    const changed = JSON.stringify(parsed) !== JSON.stringify(this.data.settings);
+    this.update({ ...this.data, settings: parsed, ...(changed && !activeArc(this.data.learning) ? { learning: { ...this.data.learning!, directions: null } } : {}) });
   }
 
   activeLesson(): Lesson | undefined {
-    return this.data.activeLessonId ? this.data.lessons.find(lesson => lesson.id === this.data.activeLessonId) : this.data.lessons.at(-1);
+    return this.data.activeLessonId === null ? undefined : this.data.activeLessonId ? this.data.lessons.find(lesson => lesson.id === this.data.activeLessonId) : this.data.lessons.at(-1);
   }
 
   pendingQuestion() {
@@ -282,6 +338,9 @@ export class LocalStore {
     if (focus && (this.activeLesson()?.id !== focus.parentLessonId || this.activeLesson()?.focus)) throw new AppError('The main lesson changed; reopen the guide and try again.', 409);
     if (!focus && this.pendingQuestion()) throw new AppError('Finish the current lesson before starting another.', 409);
     if (proposal.questions.length !== proposal.reports.length) throw new Error('Missing exercise validation reports.');
+    const arc = !focus && settings.tutorMode === 'reflective' && settings.provider !== 'demo' ? activeArc(this.data.learning) : undefined;
+    const step = arc ? remainingSteps(arc)[0] : undefined;
+    if (arc && !step) throw new AppError('Review the curriculum before preparing another lesson.', 409);
     proposal = structuredClone(proposal);
     const lesson: Lesson = {
       id: randomUUID(), createdAt: new Date().toISOString(), provider: settings.provider, model: settings.model,
@@ -302,7 +361,8 @@ export class LocalStore {
     const revisions = [...this.data.graphRevisions ?? []];
     for (const relationship of proposal.curriculum?.knowledge?.relationships ?? []) revisions.push({ id: randomUUID(), createdAt: lesson.createdAt, source: 'lesson', lessonId: lesson.id, change: { type: 'relationship', relationship } });
     for (const merge of proposal.curriculum?.knowledge?.merges ?? []) revisions.push({ id: randomUUID(), createdAt: lesson.createdAt, source: 'lesson', lessonId: lesson.id, change: { type: 'merge', ...merge } });
-    this.update({ ...this.data, lessons: [...this.data.lessons, lesson], graphRevisions: revisions, activeLessonId: lesson.id });
+    const learning = arc && step ? { ...this.data.learning!, arcs: this.data.learning!.arcs.map(item => item.id === arc.id ? { ...item, lessons: [...item.lessons, { lessonId: lesson.id, stepId: step.id, revision: item.revisions.length }] } : item) } : this.data.learning;
+    this.update({ ...this.data, lessons: [...this.data.lessons, lesson], graphRevisions: revisions, activeLessonId: lesson.id, learning });
     return structuredClone(lesson);
   }
 
@@ -470,7 +530,12 @@ export class LocalStore {
     const knownLessons = new Set(selected.map(item => item.lesson.id));
     const discussions = (this.data.discussions ?? []).filter(item => knownLessons.has(item.lessonId)).slice(-12);
     while (discussions.length > 1 && Buffer.byteLength(JSON.stringify(discussions)) > 48_000) discussions.shift();
-    return { settings: { ...this.data.settings }, knowledge: buildKnowledgeGraph(this.data), history: structuredClone(selected),
+    const arc = activeArc(this.data.learning);
+    const remaining = arc ? remainingSteps(arc) : [];
+    const learningPlan = arc && remaining[0] ? { arcId: arc.id, title: arc.plan.title, goal: arc.plan.goal, outcomes: arc.plan.outcomes, step: remaining[0], remaining,
+      finishWhen: arc.plan.finishWhen, laterChecks: arc.plan.laterChecks, recentReview: arc.revisions.at(-1)?.review } : undefined;
+    return { settings: { ...this.data.settings }, knowledge: buildKnowledgeGraph(this.data), history: structuredClone(selected), ...(learningPlan ? { learningPlan: structuredClone(learningPlan) } : {}),
+      curriculumHistory: this.data.learning?.arcs.filter(item => item.status === 'complete').slice(-12).map(item => ({ title: item.plan.title, goal: item.plan.goal, completedAt: item.completedAt, laterChecks: item.plan.laterChecks, summary: item.revisions.at(-1)?.review.summary })),
       curriculum: buildCurriculumMemory(this.data),
       // Older review details remain in durable concept evidence, just as old plans do.
       skillRetrofits: structuredClone((this.data.skillRetrofits ?? []).map(review => ({ ...review,
@@ -521,7 +586,7 @@ export class LocalStore {
         observations: [], frontier: [], mixRationale: '', sequenceRationale: '',
       } } : {}) };
     }), graphRevisions: this.data.graphRevisions?.filter(item => item.change.type !== 'relationship' || !item.lessonId || completedIds.has(item.lessonId)) };
-    return structuredClone({ settings: this.data.settings, providers, job, ...(languages ? { languages } : {}),
+    return structuredClone({ settings: this.data.settings, providers, job, learning: this.data.learning, ...(languages ? { languages } : {}),
       contexts: graph.contexts, environments: executionEnvironments(languages), knowledge: buildKnowledgeGraph(publicData), conceptMemory: buildCurriculumMemory(publicData).concepts,
       currentLesson: summaries.find(item => item.id === this.activeLesson()?.id) ?? null,
       lessonPreview: this.previewConcepts(), guides: (this.data.guides ?? []).map(item => ({ ...item, conceptId: canonicalId(item.conceptId, graph.aliases) })),

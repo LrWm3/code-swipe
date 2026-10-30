@@ -106,7 +106,7 @@ test('given a version-two notebook, when reopening and rendering its organizatio
   const data = archive(); const plan = JSON.stringify(data.lessons[0]);
   mkdirSync(join(directory, 'plans')); writeFileSync(join(directory, 'state.json'), JSON.stringify(data)); writeFileSync(join(directory, 'plans', 'archived.json'), plan);
   const store = new LocalStore(directory); const snapshot = store.snapshot();
-  assert.equal(snapshot.version, 3); assert.equal(store.pendingQuestion()!.id, 'question-2');
+  assert.equal(snapshot.version, 4); assert.equal(store.pendingQuestion()!.id, 'question-2');
   assert.equal(readFileSync(join(directory, 'plans', 'archived.json'), 'utf8'), plan);
   assert.equal(readFileSync(join(snapshot.organizationMigration!.backupDirectory, 'plans', 'archived.json'), 'utf8'), plan);
   assert.equal(new LocalStore(directory).snapshot().organizationMigration!.backupDirectory, snapshot.organizationMigration!.backupDirectory);

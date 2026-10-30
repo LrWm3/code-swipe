@@ -330,7 +330,11 @@ export function validateCurriculum(lesson: ProposedLesson, context: TutorContext
   }
   if (missingPrerequisites.length) reject('questions', `${missingPrerequisites.slice(0, 16).join('; ')}${missingPrerequisites.length > 16 ? '; additional prerequisites also need preparation' : ''}.`);
   if (!hasBuild || previous?.stage !== 'consolidate' || warmups > Math.ceil(lesson.questions.length / 3)) reject('questions.plan.stage', 'include a brief contiguous warmup (at most ceil(batchSize/3)), build, and final consolidation.');
-  if (purposes.size < 2 || !['practice', 'introduction', 'transfer'].some(purpose => purposes.has(purpose)) || !['diagnostic', 'frontier', 'robustness', 'calibration', 'strategy-evaluation'].some(purpose => purposes.has(purpose)) || !purposes.has('transfer')) {
+  if (context.learningPlan && !context.focus) {
+    // A coherent introductory lesson need not also diagnose an old mistake or
+    // manufacture transfer. Those purposes can be distributed across the arc.
+    if (!['practice', 'introduction', 'transfer', 'retention'].some(purpose => purposes.has(purpose))) reject('questions.plan.purposes', 'include an educational opportunity serving the current curriculum step.');
+  } else if (purposes.size < 2 || !['practice', 'introduction', 'transfer'].some(purpose => purposes.has(purpose)) || !['diagnostic', 'frontier', 'robustness', 'calibration', 'strategy-evaluation'].some(purpose => purposes.has(purpose)) || !purposes.has('transfer')) {
     reject('questions.plan.purposes', 'include teaching, investigation, and at least one transfer opportunity across the batch.');
   }
   if (new Set(lesson.questions.map(question => question.verdict)).size !== 2) reject('questions.verdict', 'include both correct and buggy implementations.');

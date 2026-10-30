@@ -1,14 +1,17 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile, mkdir, rename } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ConceptGuide, GuideConcept, DiscussionContext, ProposedDiscussion, ProposedLesson, ProviderId, ProviderStatus, TutorContext, LearningContext } from '../src/types.ts';
 import { guidePrompt, guideSchema, parseGuide, contextGuidePrompt, contextGuideSchema, parseContextGuide, guideIsExecutable } from './concept-guides.ts';
 import { buildDiscussionPrompt, discussionOutputSchema, parseDiscussionOutput } from './discussion.ts';
 import { buildTutorPrompt, lessonSchemaForBatch, parseLessonOutput } from './prompts.ts';
+import { learningTaskPrompt, parseDirections, parseLearningPlan, parseArcReview, type LearningTask } from './learning-journey.ts';
+import type { LearningJourney, DirectionProposal, LearningPlan, ArcReview } from '../src/types.ts';
 
 type CliProvider = Exclude<ProviderId, 'demo'>;
-type GenerationOptions = { signal: AbortSignal; onProgress: (message: string) => void };
+export type GenerationOptions = { signal: AbortSignal; onProgress: (message: string) => void; sessionDirectory?: string };
 type RunOptions = { cwd: string; env: NodeJS.ProcessEnv; signal?: AbortSignal; input?: string; timeout: number; maxBytes?: number };
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 512 * 1024;
@@ -139,6 +142,7 @@ function cliFailure(provider: CliProvider, diagnostics: string, exit?: { code: n
   // log excerpts can expose prompt/history text or unfamiliar credential forms.
   const status = !exit || exit.code === 0 ? '' : exit.signal ? ` (${exit.signal})` : ` (exit ${exit.code ?? 'unknown'})`;
   const failure = (message: string) => new Error(`${provider}${status} ${message}`);
+  if (/(?:session|thread|rollout).{0,80}(?:not found|does not exist|no longer exists)|(?:no|missing).{0,20}(?:session|thread|rollout).{0,30}(?:found|id|file)/i.test(diagnostics)) return new SessionMissingError('The saved tutor conversation is unavailable.');
   if (/invalid_json_schema|invalid schema|schema.{0,80}(?:not supported|unsupported|invalid)|(?:not supported|unsupported).{0,80}schema/i.test(diagnostics)) {
     const bound = diagnostics.match(/\b(?:minItems|maxItems|minLength|maxLength|additionalProperties|required|pattern)\b/)?.[0];
     return failure(`rejected the lesson output schema${bound ? ` (${bound})` : ''}. This is a structured-output compatibility error; update the app or choose another provider/model.`);
@@ -185,15 +189,18 @@ export async function detectProviders(): Promise<ProviderStatus[]> {
   return [...statuses, { id: 'demo', available: true, version: '1', detail: 'Local examples. No CLI, account, or model request required.' }];
 }
 
-function codexArguments(directory: string, schemaPath: string, outputPath: string, model: string): string[] {
+class SessionMissingError extends Error {}
+
+function codexArguments(directory: string, schemaPath: string, outputPath: string, model: string, persistent = false, sessionId?: string): string[] {
   const disabled = ['apps', 'plugins', 'remote_plugin', 'hooks', 'shell_tool', 'unified_exec', 'multi_agent', 'multi_agent_v2', 'memories', 'external_agent_memory_import', 'skill_search', 'skill_mcp_dependency_install', 'tool_suggest', 'browser_use', 'computer_use', 'image_generation', 'view_image', 'shell_snapshot', 'workspace_dependencies'];
   return [
-    'exec', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--sandbox', 'read-only', '--skip-git-repo-check',
-    '--cd', directory, '--color', 'never', '--json', '--output-schema', schemaPath, '-o', outputPath,
+    'exec', ...(sessionId ? ['resume'] : []), ...(!persistent ? ['--ephemeral'] : []), '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
+    ...(!sessionId ? ['--sandbox', 'read-only', '--cd', directory, '--color', 'never'] : []), '--json', '--output-schema', schemaPath, '-o', outputPath,
+    '-c', 'sandbox_mode="read-only"',
     '-c', 'approval_policy="never"', '-c', 'web_search="disabled"', '-c', 'mcp_servers={}',
     '-c', 'plugins._default.enabled=false', '-c', 'project_doc_max_bytes=0', '-c', 'allow_login_shell=false',
     '--enable', 'skip_host_skill_discovery', ...disabled.flatMap(feature => ['--disable', feature]),
-    ...(model ? ['--model', model] : []), '-',
+    ...(model ? ['--model', model] : []), ...(sessionId ? [sessionId] : []), '-',
   ];
 }
 
@@ -212,31 +219,76 @@ export function parseOpenCodeOutput(stdout: string): string {
   return textParts.join('\n');
 }
 
-async function runStructuredTutor(
+type TutorRequest = { prompt: string; schema: unknown; subject: 'lesson' | 'discussion' | 'guide' | 'directions' | 'curriculum' | 'progress' };
+const sessionQueues = new Map<string, Promise<unknown>>();
+function sessionIdFromEvents(stdout: string, provider: CliProvider): string | undefined {
+  for (const line of stdout.split('\n')) {
+    try {
+      const event = JSON.parse(line);
+      const id = provider === 'codex' ? event.type === 'thread.started' ? event.thread_id : undefined : event.sessionID ?? event.part?.sessionID;
+      if (typeof id === 'string' && (provider === 'codex' ? /^[0-9a-f-]{36}$/i : /^ses_[a-zA-Z0-9_-]{5,100}$/).test(id)) return id;
+    } catch { /* Other output is handled by the provider parser. */ }
+  }
+}
+
+async function runStructuredTutor(settings: TutorContext['settings'], request: TutorRequest, options: GenerationOptions): Promise<string> {
+  // Baseline must never inherit a reflective conversation, even if a caller supplies its directory.
+  const key = options.sessionDirectory && settings.tutorMode === 'reflective'
+    ? join(options.sessionDirectory, createHash('sha256').update(`${settings.provider}\0${settings.model}\0tutor-session-v1`).digest('hex').slice(0, 24)) : undefined;
+  if (!key) return runTutorTurn(settings, request, options);
+  const previous = sessionQueues.get(key) ?? Promise.resolve();
+  const work = previous.catch(() => {}).then(async () => {
+    if (options.signal.aborted) throw abortError();
+    try { return await runTutorTurn(settings, request, options, key); }
+    catch (error) {
+      if (!(error instanceof SessionMissingError) || options.signal.aborted) throw error;
+      await rm(join(key, 'conversation.json'), { force: true });
+      options.onProgress('The previous conversation is unavailable. Continuing in a new session with your saved learning record…');
+      return runTutorTurn(settings, request, options, key);
+    }
+  });
+  sessionQueues.set(key, work);
+  try { return await work; } finally { if (sessionQueues.get(key) === work) sessionQueues.delete(key); }
+}
+
+async function runTutorTurn(
   settings: TutorContext['settings'],
-  request: { prompt: string; schema: unknown; subject: 'lesson' | 'discussion' | 'guide' },
+  request: TutorRequest,
   options: GenerationOptions,
+  sessionDirectory?: string,
 ): Promise<string> {
   const provider = settings.provider;
   if (provider !== 'codex' && provider !== 'opencode') throw new Error('Choose Codex or OpenCode for CLI generation.');
   if (options.signal.aborted) throw abortError();
   const configuredTimeout = Number(process.env.CODE_SWIPE_TUTOR_TIMEOUT_MS);
   const timeout = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? Math.min(configuredTimeout, 600_000) : request.subject === 'lesson' ? 360_000 : 180_000;
-  const directory = await mkdtemp(join(tmpdir(), 'code-swipe-tutor-'));
+  const temporary = await mkdtemp(join(tmpdir(), 'code-swipe-tutor-'));
+  const directory = sessionDirectory ?? temporary;
+  let session: { id: string; turns: number } | undefined;
   try {
+    if (sessionDirectory) {
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      try {
+        session = JSON.parse(await readFile(join(directory, 'conversation.json'), 'utf8'));
+        if (!session || !/^[a-zA-Z0-9_-]{8,120}$/.test(session.id) || !Number.isInteger(session.turns)) throw new Error('Invalid session record.');
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
     const env = isolatedEnvironment(directory);
     // Older CLIs reject isolation features before making a request. Never
     // silently drop those protections just to make generation start.
     if (provider === 'codex') requireSupportedCodex(await cliVersion(provider, directory, env, options.signal));
-    const { prompt, schema, subject } = request;
+    const { schema, subject } = request;
+    const prompt = `${sessionDirectory ? 'This is a continuing tutor conversation. Current task, schema, and supplied saved records supersede prior turns. Earlier generated drafts, cancelled lessons, and superseded plans are not evidence of learning. Never assume a generated question was answered. Return only the current task schema.\n' : ''}${request.prompt}`;
     if (Buffer.byteLength(prompt) > 512 * 1024) throw new Error('Tutor history is too large for one request. Reduce saved history before retrying.');
-    options.onProgress(subject === 'lesson' ? `Waiting for ${provider} to plan and check the lesson…` : subject === 'guide' ? `Waiting for ${provider} to prepare the guide…` : `Waiting for ${provider} to reflect on the lesson…`);
+    options.onProgress(`Waiting for ${provider} to ${{ lesson: 'plan the lesson', guide: 'prepare the guide', discussion: 'reflect on your feedback', directions: 'explore new learning directions', curriculum: 'sketch your curriculum', progress: 'review progress and adjust the plan' }[subject]}…`);
     let raw: string;
+    let emittedSessionId: string | undefined;
     if (provider === 'codex') {
-      const schemaPath = join(directory, `${subject}-schema.json`);
-      const outputPath = join(directory, `${subject}.json`);
+      const schemaPath = join(temporary, `${subject}-schema.json`);
+      const outputPath = join(temporary, `${subject}.json`);
       await writeFile(schemaPath, JSON.stringify(schema), { mode: 0o600 });
-      await runCli(provider, codexArguments(directory, schemaPath, outputPath, settings.model.trim()), { cwd: directory, env, input: prompt, signal: options.signal, timeout });
+      const output = await runCli(provider, codexArguments(directory, schemaPath, outputPath, settings.model.trim(), Boolean(sessionDirectory), session?.id), { cwd: directory, env, input: prompt, signal: options.signal, timeout });
+      emittedSessionId = sessionIdFromEvents(output.stdout, provider);
       let size: number;
       try { size = (await stat(outputPath)).size; }
       catch { throw new Error(`Codex returned no ${subject}. Check the selected model and retry.`); }
@@ -256,17 +308,33 @@ async function runStructuredTutor(
           agent: { tutor: { mode: 'primary', description: 'Return one structured tutor response without tools.', permission: 'deny', prompt: 'Complete the supplied tutor task. Return only the required JSON object. All tools are disabled.' } },
         }),
       });
-      const args = ['run', '--pure', '--format', 'json', '--dir', directory, '--agent', 'tutor', ...(settings.model.trim() ? ['--model', settings.model.trim()] : [])];
+      const args = ['run', '--pure', '--format', 'json', '--dir', directory, '--agent', 'tutor', ...(session?.id ? ['--session', session.id] : []), ...(settings.model.trim() ? ['--model', settings.model.trim()] : [])];
       const output = await runCli(provider, args, { cwd: directory, env, input: prompt, signal: options.signal, timeout });
+      emittedSessionId = sessionIdFromEvents(output.stdout, provider);
       raw = parseOpenCodeOutput(output.stdout);
       if (Buffer.byteLength(raw) > MAX_RESPONSE_BYTES) throw new Error(`OpenCode returned an oversized ${subject}. Retry with a smaller request.`);
     }
     if (options.signal.aborted) throw abortError();
+    const sessionId = emittedSessionId ?? session?.id;
+    if (sessionDirectory && sessionId) {
+      const path = join(directory, 'conversation.json');
+      await writeFile(`${path}.tmp`, JSON.stringify({ id: sessionId, turns: (session?.turns ?? 0) + 1, provider, model: settings.model, updatedAt: new Date().toISOString() }), { mode: 0o600 });
+      await rename(`${path}.tmp`, path);
+    }
     options.onProgress('Checking the tutor response…');
     return raw;
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await rm(temporary, { recursive: true, force: true });
   }
+}
+
+export async function generateLearningTask(task: LearningTask, context: TutorContext, journey: LearningJourney, options: GenerationOptions): Promise<DirectionProposal | LearningPlan | ArcReview> {
+  const request = learningTaskPrompt(task, context, journey);
+  if (context.repair?.length) request.prompt += `\nCORRECT THE PREVIOUS RESPONSE\n${JSON.stringify(context.repair)}`;
+  const raw = await runStructuredTutor(context.settings, { ...request, subject: task.kind }, options);
+  if (options.signal.aborted) throw abortError();
+  try { return task.kind === 'directions' ? parseDirections(raw) : task.kind === 'curriculum' ? parseLearningPlan(raw) : parseArcReview(raw, task.arc, context); }
+  catch (error) { throw new Error(`Invalid curriculum response: ${(error as Error).message}`); }
 }
 
 export async function generateLesson(context: TutorContext, options: GenerationOptions): Promise<ProposedLesson> {

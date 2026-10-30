@@ -31,7 +31,9 @@ export function createApp(service: TutorService) {
   app.use(express.json({ limit: '64kb' }));
   app.get('/api/state', (_req, res) => res.json(service.state()));
   app.put('/api/settings', (req, res) => { service.saveSettings(req.body); res.json(service.state()); });
-  app.post('/api/plan', (_req, res) => { service.plan(); res.status(202).json(service.state()); });
+  app.post('/api/plan', (_req, res) => { service.next(); res.status(202).json(service.state()); });
+  app.post('/api/learning/directions', (_req, res) => { service.proposeDirections(); res.status(202).json(service.state()); });
+  app.post('/api/learning/choose', (req, res) => { service.chooseDirection(req.body?.setId, req.body?.directionId); res.status(202).json(service.state()); });
   app.post('/api/concepts/:id/guide', (req, res) => { service.prepareGuide(req.params.id, req.body?.language, req.body?.contextId); res.json(service.state()); });
   app.post('/api/concepts/:id/events', (req, res) => { service.store.recordGuideEvent(req.params.id, req.body?.action, req.body?.language, req.body?.contextId); res.json(service.state()); });
   app.post('/api/concepts/:id/practice', (req, res) => { service.plan({ conceptId: req.params.id, length: req.body?.length, language: req.body?.language, contextId: req.body?.contextId }); res.status(202).json(service.state()); });

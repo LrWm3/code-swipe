@@ -50,7 +50,7 @@ const assignments: Record<string, { kind: KnowledgeKind; topics: string[]; uses:
 };
 
 export function migrateOrganization(data: StoreData, backupDirectory: string, at = new Date().toISOString()) {
-  if (data.version === 3) return { data, report: { needed: false, classified: data.organizationMigration?.classifiedIds.length ?? 0, added: data.organizationMigration?.addedIds.length ?? 0, lessons: data.lessons.length, answers: data.attempts.length } };
+  if (data.version >= 3) return { data, report: { needed: false, classified: data.organizationMigration?.classifiedIds.length ?? 0, added: data.organizationMigration?.addedIds.length ?? 0, lessons: data.lessons.length, answers: data.attempts.length } };
   if (data.version !== 2) throw new Error('Migrate the notebook to knowledge version 2 before organizing it.');
   const graph = buildKnowledgeGraph(data);
   const concepts = new Map<string, KnowledgeConcept>(graph.concepts.map(item => [item.id, { ...item, kind: assignments[item.id]?.kind ?? item.kind ?? 'skill' as KnowledgeKind }]));

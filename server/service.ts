@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import type { AppState, Job, Language, ProviderStatus } from '../src/types.ts';
+import { join } from 'node:path';
+import type { AppState, Job, Language, ProviderStatus, DirectionProposal, LearningPlan, ArcReview, TutorContext } from '../src/types.ts';
 import { AppError, LocalStore, parseSettings } from './store.ts';
-import { detectProviders, generateLesson, generateDiscussion, generateGuide } from './providers.ts';
+import { detectProviders, generateLesson, generateDiscussion, generateGuide, generateLearningTask } from './providers.ts';
+import { activeArc, arcEvidenceHash, type LearningTask } from './learning-journey.ts';
 import { createDemoLesson } from './demo.ts';
 import { createPythonDemoLesson } from './python-demo.ts';
 import { createRustDemoLesson } from './rust-demo.ts';
@@ -18,7 +20,8 @@ export class TutorService {
   private controller: AbortController | null = null;
   private work: Promise<void> = Promise.resolve();
   constructor(readonly store: LocalStore, readonly providers: ProviderStatus[], private generate = generateLesson, private discussWithTutor = generateDiscussion,
-    readonly languages: NonNullable<AppState['languages']> = [{ id: 'javascript', available: true, detail: 'JavaScript sandbox ready.' }, { id: 'python', available: true, detail: 'Python sandbox availability has not been checked.' }, { id: 'rust', available: true, detail: 'Rust sandbox availability has not been checked.' }]) {}
+    readonly languages: NonNullable<AppState['languages']> = [{ id: 'javascript', available: true, detail: 'JavaScript sandbox ready.' }, { id: 'python', available: true, detail: 'Python sandbox availability has not been checked.' }, { id: 'rust', available: true, detail: 'Rust sandbox availability has not been checked.' }],
+    private planLearning = generateLearningTask) {}
 
   static async create(directory: string) {
     const [providers, python, rust] = await Promise.all([detectProviders(), pythonAvailability(), rustAvailability()]);
@@ -32,6 +35,100 @@ export class TutorService {
   }
   requireIdle() {
     if (this.job?.status === 'running') throw new AppError('Cancel the current tutor run before changing settings or evidence.', 409);
+  }
+  private sessionDirectory() { return join(this.store.directory, 'agent-sessions'); }
+
+  private learningContext(): TutorContext {
+    const context = this.store.context();
+    context.environments = executionEnvironments(this.languages);
+    return context;
+  }
+
+  private runLearning(kind: 'directions' | 'curriculum' | 'progress', work: (signal: AbortSignal, active: () => boolean, progress: (message: string) => void) => Promise<void>) {
+    this.requireIdle();
+    const settings = this.store.snapshot().settings;
+    if (settings.tutorMode !== 'reflective' || settings.provider === 'demo') throw new AppError('Choose a reflective Codex or OpenCode tutor to plan a curriculum.');
+    if (!this.providers.some(item => item.id === settings.provider && item.available)) throw new AppError(`${settings.provider} is unavailable. Check Setup.`, 503);
+    if (this.store.pendingQuestion()) throw new AppError('Finish the current lesson before planning the next direction.', 409);
+    const controller = new AbortController();
+    this.controller = controller;
+    const job: Job = { id: randomUUID(), kind, status: 'running', stage: kind, startedAt: new Date().toISOString(), message: kind === 'directions' ? 'Finding three new learning directions…' : kind === 'curriculum' ? 'Sketching your curriculum…' : 'Reviewing progress and adjusting the remaining lessons…' };
+    this.job = job;
+    this.store.recordJob(job);
+    const active = () => !controller.signal.aborted && this.job?.id === job.id && job.status === 'running';
+    const progress = (message: string) => { if (active()) { job.message = message; this.store.recordJob(job); } };
+    this.work = (async () => {
+      try {
+        await work(controller.signal, active, progress);
+        if (!active()) return;
+        Object.assign(job, { status: 'ready', stage: 'ready', message: 'Your learning plan is ready.' });
+        this.store.recordJob(job);
+      } catch (error) {
+        if (!active()) return;
+        Object.assign(job, { status: 'error', stage: 'error', message: error instanceof Error ? error.message : 'Planning stopped. Your learning record is saved.' });
+        this.store.recordJob(job);
+      }
+    })();
+  }
+
+  private async learningRequest(task: LearningTask, signal: AbortSignal, onProgress: (message: string) => void) {
+    const context = this.learningContext();
+    for (let attempt = 0; ; attempt++) {
+      try { return await this.planLearning(task, context, this.store.snapshot().learning!, { signal, onProgress, sessionDirectory: this.sessionDirectory() }); }
+      catch (error) {
+        if (signal.aborted || attempt >= 2 || !(error instanceof Error) || !error.message.startsWith('Invalid curriculum response:')) throw error;
+        context.repair = [error.message];
+        onProgress('Correcting the curriculum response before saving it…');
+      }
+    }
+  }
+
+  proposeDirections() {
+    if (activeArc(this.store.snapshot().learning)) throw new AppError('Finish the current curriculum before choosing another direction.', 409);
+    this.runLearning('directions', async (signal, active, progress) => {
+      const proposal = await this.learningRequest({ kind: 'directions' }, signal, progress) as DirectionProposal;
+      if (active()) this.store.saveDirections(proposal);
+    });
+  }
+
+  chooseDirection(setId: string, directionId: string) {
+    const learning = this.store.snapshot().learning!;
+    const choices = learning.directions;
+    const direction = choices?.options.find(item => item.id === directionId);
+    if (!choices || choices.id !== setId || !direction || activeArc(learning)) throw new AppError('Choose one of the current learning directions.', 409);
+    this.runLearning('curriculum', async (signal, active, progress) => {
+      const plan = await this.learningRequest({ kind: 'curriculum', direction }, signal, progress) as LearningPlan;
+      if (active()) this.store.beginCurriculum(setId, directionId, plan);
+    });
+  }
+
+  next() {
+    this.requireIdle();
+    if (this.store.activeLesson()?.focus) throw new AppError('Return from focused practice to your main lesson first.', 409);
+    const data = this.store.snapshot();
+    if (data.settings.provider === 'demo' || data.settings.tutorMode === 'baseline') return this.plan();
+    if (this.store.pendingQuestion()) throw new AppError('Finish the current lesson first.', 409);
+    const arc = activeArc(data.learning);
+    if (!arc) return this.proposeDirections();
+    const previous = arc.lessons.at(-1);
+    const lastReview = arc.revisions.at(-1);
+    if (!previous || lastReview?.afterLessonId === previous.lessonId && lastReview.evidenceHash === arcEvidenceHash(data, arc)) return this.plan();
+    this.store.skipUnansweredDiscussions();
+    this.runLearning('progress', async (signal, active, progress) => {
+      const review = await this.learningRequest({ kind: 'progress', arc }, signal, progress) as ArcReview;
+      if (!active()) return;
+      this.store.reviewCurriculum(arc.id, review);
+      if (review.decision === 'complete') {
+        progress('Curriculum complete. Finding three directions for what comes next…');
+        const choices = await this.learningRequest({ kind: 'directions' }, signal, progress) as DirectionProposal;
+        if (active()) this.store.saveDirections(choices);
+      } else {
+        Object.assign(this.job!, { status: 'ready', stage: 'ready', message: 'Curriculum reviewed. Preparing the next lesson.' });
+        this.store.recordJob(this.job!);
+        this.plan();
+        await this.settled();
+      }
+    });
   }
   plan(focusRequest?: { conceptId: string; length: number; language?: Language; contextId?: string }) {
     this.requireIdle();
@@ -48,6 +145,7 @@ export class TutorService {
     context = this.store.context();
     context.environments = executionEnvironments(this.languages);
     if (focusRequest && concept && parent) {
+      delete context.learningPlan;
       const contextId = focusRequest.contextId ?? focusRequest.language ?? parent.contextIds?.[0] ?? parent.language ?? 'javascript';
       const definition = buildKnowledgeGraph(this.store.snapshot()).contexts.find(item => item.id === contextId);
       if (!definition) throw new AppError('Choose a known learning context.');
@@ -75,7 +173,7 @@ export class TutorService {
         const earlierFailures: string[] = [];
         for (let attempt = 0; attempt <= maxRepairs; attempt++) {
           const repairMessage = `A check failed. Asking the tutor to repair the lesson (${attempt} of ${maxRepairs})…`;
-          const proposal = context.settings.provider === 'demo' ? (context.settings.language === 'rust' ? createRustDemoLesson(context) : context.settings.language === 'python' ? createPythonDemoLesson(context) : createDemoLesson(context)) : await this.generate(context, { signal: controller.signal, onProgress: message => progress(attempt ? repairMessage : message, attempt ? 'repairing' : 'planning') });
+          const proposal = context.settings.provider === 'demo' ? (context.settings.language === 'rust' ? createRustDemoLesson(context) : context.settings.language === 'python' ? createPythonDemoLesson(context) : createDemoLesson(context)) : await this.generate(context, { signal: controller.signal, sessionDirectory: this.sessionDirectory(), onProgress: message => progress(attempt ? repairMessage : message, attempt ? 'repairing' : 'planning') });
           if (!active()) return;
           progress('Checking the lesson and running supported exercises in their isolated environments…', 'validating');
           let validated: Awaited<ReturnType<typeof validateLesson>>;
@@ -132,7 +230,7 @@ export class TutorService {
         const guide = curated ? { ...await parseGuide(JSON.stringify({ title: curated.title, description: curated.description, takeaway: curated.takeaway,
           examples: curated.examples.map(example => ({ mode: example.mode ?? 'expression', expression: example.expression, expectedJson: JSON.stringify(example.result), explanation: example.explanation })) }), concept, controller.signal, language), contextId: selectedContext, version: curated.version } : await generateGuide(settings, concept, { signal: controller.signal, onProgress: message => {
           if (active()) { job.message = message; this.store.recordJob(job); }
-        } }, definition);
+        }, sessionDirectory: this.sessionDirectory() }, definition);
         if (!active()) return;
         this.store.saveGuide(guide);
         Object.assign(job, { status: 'ready', stage: 'ready', message: 'Concept guide ready.' });
@@ -168,7 +266,7 @@ export class TutorService {
           if (!active()) return;
           job.message = message;
           this.store.recordJob(job);
-        } });
+        }, sessionDirectory: this.sessionDirectory() });
         if (!active()) return;
         this.store.commitDiscussion(lessonId, proposal);
         Object.assign(job, { status: 'ready', stage: 'ready', message: 'Tutor response saved. Follow-up questions are optional.' });

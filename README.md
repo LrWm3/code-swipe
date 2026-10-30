@@ -4,7 +4,7 @@ Code Swipe currently supports **local use only**. Run the app and its server on 
 
 Read a little code or a proposed technical answer. Swipe right for correct, left for buggy/incorrect, or choose IDK. Keep playing, and open an explanation whenever you want one.
 
-Code Swipe is built around a single teaching agent, powered by your installed **Codex** or **OpenCode** CLI. It keeps a notebook of tentative learner hypotheses, plans short lessons, and commits its predictions *before* you answer. Your answers shape the next lesson. No account system, Firebase, subjects, Elo, or mastery tree.
+Code Swipe is built around a single teaching agent, powered by your installed **Codex** or **OpenCode** CLI. It proposes learning directions, sketches a curriculum spanning several short lessons, and adjusts the remaining plan as you learn. It keeps tentative learner hypotheses and commits predictions *before* you answer. No account system, Firebase, subjects, Elo, or mastery tree.
 
 ## Try it
 
@@ -15,7 +15,7 @@ npm ci
 npm run dev
 ```
 
-Open **http://127.0.0.1:3000**. Click **Try practice demo** for a local walkthrough, or use your signed-in CLI:
+Open **http://127.0.0.1:3000**. Choose **Practice demo** in Setup for a local walkthrough, or use your signed-in CLI:
 
 ```sh
 codex login
@@ -32,17 +32,21 @@ docker pull rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7
 
 Restart the server after preparing an image. Setup shows whether each sandbox is available; the app never falls back to running generated Python or Rust directly on your machine.
 
-Choose your provider, preferred contexts, and interests in **Setup**, then start a lesson. The tutor can explore related technologies and domains automatically, or mix two contexts for a deliberate transfer lesson. Excluded contexts and their specializations are avoided. Changes apply to the next lesson; focused practice keeps the guide’s context. Leave the model blank for the CLI default, or enter a Codex model name / OpenCode `provider/model` identifier. Restart the server after installing a missing CLI. Codex requires **0.153.4 or newer** for this app's isolation options; OpenCode was tested with 1.17.13. Setup shows the version found by the server. If it differs from your terminal's version, set `CODE_SWIPE_CODEX_BIN` in `.env` to the supported executable's absolute path.
+Choose your provider, preferred contexts, and interests in **Setup**, then explore three learning directions. Preview an explanation and example, choose one, or use **Choose for me** to take the recommendation. Your tutor sketches 2–6 lessons toward a meaningful goal; **Prepare first lesson** starts the cards. The tutor can explore related technologies and domains automatically, or mix two contexts for a deliberate transfer lesson. Excluded contexts and their specializations are avoided. Changes apply to the next lesson; focused practice keeps the guide’s context. Leave the model blank for the CLI default, or enter a Codex model name / OpenCode `provider/model` identifier. Restart the server after installing a missing CLI. Codex requires **0.153.4 or newer** for this app's isolation options; OpenCode was tested with 1.17.13. Setup shows the version found by the server. If it differs from your terminal's version, set `CODE_SWIPE_CODEX_BIN` in `.env` to the supported executable's absolute path.
 
 Drag the card, use the buttons, or press the arrow keys. Answers advance straight to the next card. **Review previous** opens the explanation without interrupting the next question; older answers remain in **Notebook**. IDK records uncertainty without counting as a wrong answer.
 
-At the end of a lesson, share any feedback: your reasoning, confusion, corrections, pacing, interests, or what you want next. **Send to tutor** gets a short reflection and up to three optional follow-up questions. Reply to any you want, leave others blank, or go straight to **Next lesson**. You can also continue while the tutor is thinking. Notes and replies help the reflective tutor reconsider its assumptions; skips carry no penalty. **Update tutor** lets you discuss further before continuing, and **Notebook** keeps the exchange.
+At the end of a lesson, share any feedback: your reasoning, confusion, corrections, pacing, interests, or what you want next. **Send to tutor** gets a short reflection and up to three optional follow-up questions. Reply to any you want, leave others blank, or select **Review progress & continue**. You can also continue while the tutor is thinking. Notes and replies help the reflective tutor reconsider its assumptions; skips carry no penalty. **Update tutor** lets you discuss further before continuing, and **Notebook** keeps the exchange.
 
 You can mark accidental answers before requesting the next batch. Those answers stay in your record but are excluded from evidence and metrics. Flawed exercises can also be flagged in their review. Feedback can change the tutor's interpretation without changing old grades or predictions.
 
 The demo uses curated examples and neutral predictions. It is not adaptive. For the actual experiment, switch to Codex or OpenCode.
 
 ## What this v1 does
+
+- Offers three broadly different learning directions, one recommendation, and optional previews with a small example and documentation links. Empty preferences allow the tutor to broaden your education over time.
+- Builds a flexible 2–6 lesson curriculum with observable outcomes and a finish condition. Reviews completed work before generating the next lesson, saves reasons for outline changes, and returns to new choices when the goal has enough supporting evidence.
+- Keeps isolated mistakes as observations. Diagnostic detours require a sustained pattern: at least three attributable errors among the latest five meaningful opportunities for a concept in a context. Explicit requests for help and focused practice remain available at any time.
 
 - Plans 6, 8, or 12 questions at a time (8 by default), with explicit assumptions, alternative explanations, and predictions.
 - Gives each question educational and investigative objectives, with multiple purposes such as practice, transfer, retention, frontier exploration, or checking a teaching strategy. Lessons record their mix, progression, cognitive demand, and scaffolding; planning checks reject missing or inconsistent annotations.
@@ -57,7 +61,7 @@ The demo uses curated examples and neutral predictions. It is not adaptive. For 
 
 After a lesson, question reviews include optional intent details. Completed lessons reveal curriculum notes in **Notebook**, separating observed answers from the tutor's interpretation and proposed next action. Later observations build on archived evidence without rewriting earlier intent. These planning rules are experimental, not validated pedagogy or a mastery assessment.
 
-Existing lessons remain readable without curriculum annotations. Newly generated lessons include them; a current batch stays fixed, and answers or feedback influence the next lesson.
+Version 4 groups earlier sessions under one **Legacy learning** entry. Their original questions, answers, predictions, guides, and evidence remain intact. Existing lessons remain readable without curriculum annotations. Newly generated lessons include them; a current batch stays fixed, and answers or feedback influence the next lesson.
 
 Skill memory keeps the last targeted encounter, last meaningful exercise, and last independent supporting answer separately. Raw right/wrong counts still describe whole-card judgments, not successes or failures on every component. The tutor uses the evidence and its uncertainty to choose embedded practice or focused checks; there is no automatic forgetting timer. Skill roles and interpretations are model judgments, not proof of the learner's reasoning. An old prerequisite is not credited merely because it appears in a dependency chain.
 
@@ -77,13 +81,13 @@ Evidence and familiarity are tracked per concept and context. Success with Pytho
 
 **Notebook → Knowledge & contexts** groups learning records by topic and lets you filter by context and record type. Related-practice counts summarize coverage without awarding familiarity to parent topics or concepts. Study guides use broader conceptual explanations for narrow skills, while technique and representation guides retain their focus. You can inspect the original contextual evidence and review identity history. The tutor reuses stable identities and may merge clear equivalents automatically. **Undo merge** rebuilds the derived evidence while preserving archived questions and predictions. General concepts and their specializations remain distinct.
 
-Existing notebooks upgrade on startup after checking their sealed plans: version 2 adds contextual evidence, and version 3 organizes the records by topic and knowledge type. Migration saves a complete state/plan backup under `.code-swipe/backups/knowledge-v1-*`; it does not change original lesson files, hashes, answers, or active progress. To inspect a migration first, run `npm run migrate:knowledge -- --data-dir .code-swipe`. With the server stopped, add `--apply` to perform it. For the organization upgrade, use `npm run migrate:organization -- --data-dir .code-swipe` to preview it; with the server stopped, add `--apply` to save a backup under `.code-swipe/backups/organization-v2-*` and apply it. Existing IDs, evidence, guide versions, answers, and immutable plans stay intact. New parent concepts record related coverage rather than inferred familiarity. Both migrations are repeatable without duplicating records.
+Existing notebooks upgrade on startup after checking their sealed plans: version 2 adds contextual evidence, and version 3 organizes the records by topic and knowledge type. Migration saves a complete state/plan backup under `.code-swipe/backups/knowledge-v1-*`; it does not change original lesson files, hashes, answers, or active progress. To inspect a migration first, run `npm run migrate:knowledge -- --data-dir .code-swipe`. With the server stopped, add `--apply` to perform it. For the organization upgrade, use `npm run migrate:organization -- --data-dir .code-swipe` to preview it; with the server stopped, add `--apply` to save a backup under `.code-swipe/backups/organization-v2-*` and apply it. Existing IDs, evidence, guide versions, answers, and immutable plans stay intact. New parent concepts record related coverage rather than inferred familiarity. These migrations are repeatable without duplicating records. Version 4 adds curricula and a legacy collection, saving a state/plan backup under `.code-swipe/backups/curricula-v3-*`. It preserves an unfinished lesson unless you explicitly cancel it.
 
 ## Local data and model calls
 
 History lives in `.code-swipe/`, which Git ignores. The server listens on loopback only. Your browser needs no API key. Codex/OpenCode still sends lesson context to whichever model provider your CLI uses; those requests use your existing account and its normal limits or charges. “Local” describes the app and its storage, not necessarily inference.
 
-The tutor receives recent answered lessons, your lesson notes, optional conversations, review timings, evidence supporting current hypotheses, and concept evidence reconstructed from the archive so older concepts survive the recent-history window. Baseline mode receives none of that history. CLI tools, workspace instructions, and plugins are disabled for these planning calls; this app supplies the complete context. OpenCode's global configuration is isolated, so choose a model explicitly if its default is unsuitable. Existing CLI authentication remains in use.
+The tutor receives recent answered lessons, your lesson notes, optional conversations, review timings, evidence supporting current hypotheses, and concept evidence reconstructed from the archive so older concepts survive the recent-history window. Baseline mode receives none of that history. Reflective mode reuses one tutor session per notebook, provider, and model for directions, curricula, lessons, guides, and discussions. Each task supplies current authoritative records so cancelled drafts and flagged evidence do not become learning history. Baseline calls use fresh sessions. CLI tools, workspace instructions, and plugins remain disabled. OpenCode's global configuration is isolated, so choose a model explicitly if its default is unsuitable. Existing CLI authentication remains in use. Session handles and OpenCode’s dedicated session database live under `.code-swipe/agent-sessions/`; Codex retains its conversation in its normal CLI storage. If a saved session is missing, the app can start another using your notebook.
 
 **Export record** downloads plans and raw answers, including answers for any unfinished lesson. Keep it private if you want to preserve the exercise. Back up the entire data directory to restore it; export is for inspection, not an import format. Run only one server against a given data directory.
 

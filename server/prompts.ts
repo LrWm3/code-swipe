@@ -3,7 +3,7 @@ import { LESSON_SIZES } from '../src/lesson-sizes.ts';
 import { PURPOSES, KNOWLEDGE_KINDS } from '../src/types.ts';
 import { buildKnowledgeTutorPrompt } from './knowledge-prompts.ts';
 
-type Schema = {
+export type Schema = {
   type?: string | string[];
   properties?: Record<string, Schema>;
   required?: string[];

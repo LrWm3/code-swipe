@@ -108,6 +108,7 @@ process.stdin.on('end', () => {
     db: process.env.OPENCODE_DB, codexThread: process.env.CODEX_THREAD_ID,
     opencodeConfig: process.env.OPENCODE_CONFIG,
   }));
+  if (mode === 'missing-session' && (args.includes('resume') || args.includes('--session'))) { console.error('Session not found'); process.exit(1); }
   if (mode === 'auth') { console.error('401 authentication error: SECRET-NEVER-DISPLAY'); process.exit(1); }
   if (mode === 'feature') { console.error('Error: Unknown feature flag: skip_host_skill_discovery SECRET-NEVER-DISPLAY'); process.exit(1); }
   if (mode === 'schema') { console.error('invalid_json_schema: minItems is not supported SECRET-NEVER-DISPLAY'); process.exit(1); }
@@ -136,9 +137,9 @@ process.stdin.on('end', () => {
   }
   const content = mode === 'malformed' ? '{bad JSON' : fs.readFileSync(process.env.CODE_SWIPE_FAKE_FIXTURE, 'utf8');
   const out = args.indexOf('-o');
-  if (out >= 0) fs.writeFileSync(args[out + 1], content);
+  if (out >= 0) { console.log(JSON.stringify({ type: 'thread.started', thread_id: '12345678-1234-1234-1234-123456789012' })); fs.writeFileSync(args[out + 1], content); }
   else {
-    console.log(JSON.stringify({ type: 'step_start', part: {} }));
+    console.log(JSON.stringify({ type: 'step_start', sessionID: 'ses_testconversation', part: {} }));
     console.log(JSON.stringify({ type: 'text', part: { text: content } }));
     console.log(JSON.stringify({ type: 'step_finish', part: {} }));
   }
@@ -525,4 +526,61 @@ test('given extensive history and flagged attempts, when prompting for discussio
   assert.equal(evidence.tutor.history[0].lesson.id, 'history-7');
   assert.equal(evidence.tutor.history.at(-1).lesson.id, 'history-14');
   assert.doesNotMatch(prompt, /flagged-history-/);
+});
+
+
+test('given a reflective notebook, when preparing successive tasks, then both providers resume only that notebook session and baseline remains fresh', async t => {
+  for (const provider of ['codex', 'opencode'] as const) await t.test(provider, async t => {
+    const fake = await fakeCli(t);
+    const tutor = context(provider);
+    const sessionDirectory = join(fake.directory, 'notebook-sessions');
+    const options = { signal: new AbortController().signal, onProgress() {}, sessionDirectory };
+    await generateLesson(tutor, options);
+    const first = JSON.parse(await readFile(fake.record, 'utf8'));
+    await generateLesson(tutor, options);
+    const second = JSON.parse(await readFile(fake.record, 'utf8'));
+    assert.equal(first.cwd, second.cwd);
+    if (provider === 'codex') {
+      assert.ok(!first.args.includes('--ephemeral'));
+      assert.ok(!first.args.includes('resume'));
+      assert.ok(second.args.includes('resume'));
+      assert.ok(second.args.includes('12345678-1234-1234-1234-123456789012'));
+      assert.ok(second.args.includes('--output-schema'));
+      assert.ok(second.args.includes('sandbox_mode="read-only"'));
+      assert.ok(second.args.includes('--ignore-user-config'));
+    } else {
+      assert.ok(!first.args.includes('--session'));
+      assert.ok(second.args.includes('--session'));
+      assert.ok(second.args.includes('ses_testconversation'));
+      assert.equal(first.db, second.db);
+      assert.equal(second.permission, '{"*":"deny"}');
+    }
+    const saved = JSON.parse(await readFile(join(second.cwd, 'conversation.json'), 'utf8'));
+    assert.equal(saved.turns, 2);
+    await generateLesson({ ...tutor, settings: { ...tutor.settings, tutorMode: 'baseline' } }, options);
+    const baseline = JSON.parse(await readFile(fake.record, 'utf8'));
+    assert.notEqual(baseline.cwd, second.cwd);
+    assert.ok(!baseline.args.includes('resume') && !baseline.args.includes('--session'));
+    if (provider === 'codex') assert.ok(baseline.args.includes('--ephemeral'));
+    assert.equal(JSON.parse(await readFile(join(second.cwd, 'conversation.json'), 'utf8')).turns, 2);
+    await generateLesson({ ...tutor, settings: { ...tutor.settings, model: 'different-model' } }, options);
+    const changed = JSON.parse(await readFile(fake.record, 'utf8'));
+    assert.notEqual(changed.cwd, second.cwd);
+    assert.ok(!changed.args.includes('resume') && !changed.args.includes('--session'));
+  });
+});
+
+
+test('given a provider whose saved conversation was removed, when resuming, then a fresh isolated session receives the current notebook task', async t => {
+  const fake = await fakeCli(t);
+  const options = { signal: new AbortController().signal, onProgress() {}, sessionDirectory: join(fake.directory, 'sessions') };
+  await generateLesson(context(), options);
+  process.env.CODE_SWIPE_FAKE_MODE = 'missing-session';
+  await generateLesson(context(), options);
+  const request = JSON.parse(await readFile(fake.record, 'utf8'));
+  assert.ok(!request.args.includes('resume'));
+  assert.ok(request.args.includes('--ignore-user-config'));
+  assert.match(request.input, /Fishing/);
+  const saved = JSON.parse(await readFile(join(request.cwd, 'conversation.json'), 'utf8'));
+  assert.equal(saved.turns, 1);
 });

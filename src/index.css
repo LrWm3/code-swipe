@@ -392,3 +392,44 @@ td { color: #b1bac4; }
 .knowledge-ungrouped h3 { font-size: .9rem; }
 .preview-kind { display: block; margin-top: .2rem; font-size: .65rem; color: #9ca3af; text-align: left; }
 @media (max-width: 600px) { .knowledge-filters { grid-template-columns: 1fr; } }
+
+/* Learning directions and continuing curricula share the existing notebook style. */
+.learning-directions .page-intro { margin-bottom: 22px; }
+.direction-options { display: grid; gap: 16px; }
+.direction-option { padding: 24px; }
+.direction-option.recommended { border-color: #58a6ff80; background: linear-gradient(130deg, #58a6ff0b, transparent), var(--panel); }
+.direction-option h2 { margin: 12px 0 8px; font-size: 1.2rem; }
+.direction-option .fine-print { margin: 10px 0 0; }
+.direction-actions, .direction-footer { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 20px; }
+.direction-actions { justify-content: space-between; }
+.recommendation-note { margin-top: 20px; color: var(--muted); }
+.direction-example { white-space: pre-wrap; overflow-wrap: anywhere; padding: 18px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); font: .82rem/1.7 var(--mono); }
+.direction-preview h3 { margin-top: 24px; margin-bottom: 10px; }
+.direction-preview p + p { margin-top: 12px; }
+.direction-preview .review-dialog-footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.curriculum-ready h1 { margin: 12px 0 18px; }
+.curriculum-outline > h3 { margin-top: 22px; }
+.curriculum-outline .notice { margin-top: 20px; }
+.curriculum-steps { list-style: none; padding: 0; margin: 12px 0 22px; }
+.curriculum-steps > li { display: flex; gap: 14px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.step-number { flex: 0 0 30px; height: 30px; display: grid; place-items: center; border: 1px solid #58a6ff60; color: var(--blue); border-radius: 50%; font: .8rem var(--mono); }
+.curriculum-steps p { margin: 6px 0; }
+.curriculum-steps small { color: var(--muted); }
+.curriculum-ready > .fine-print { margin: 20px 0; }
+.curriculum-history { margin: 24px 0; }
+.curriculum-history > h2 { margin-bottom: 12px; }
+.curriculum-history > details { margin: 12px 0; }
+.curriculum-history summary { cursor: pointer; }
+.curriculum-history summary .fine-print { display: block; margin-top: 5px; }
+.curriculum-history .curriculum-outline { margin-top: 20px; }
+.curriculum-revision { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 16px; }
+.curriculum-revision > p, .curriculum-revision li p { margin-top: 8px; }
+.completed-curriculum { margin-bottom: 24px; }
+.completed-curriculum > summary { cursor: pointer; display: flex; gap: 10px; align-items: center; color: #7ee787; }
+.completed-curriculum .curriculum-outline { margin-top: 18px; }
+.legacy-learning > p { margin: 14px 0; }
+.legacy-learning > h3 { margin-top: 24px; }
+.learning-directions > .panel > .button { margin-top: 20px; }
+@media (max-width: 600px) { .direction-option { padding: 20px; } .curriculum-steps > li { gap: 10px; } }
+
+@media (min-width: 881px) { .legacy-learning { grid-column: 2 / -1; } }

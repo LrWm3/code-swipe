@@ -6,14 +6,14 @@ import { knowledgeKind } from '../src/knowledge-organization.ts';
 export function selectPlanningKnowledge(context: TutorContext) {
   const graph = context.knowledge!;
   const memory = context.curriculum?.concepts ?? [];
-  const terms = (context.settings.interests.toLowerCase().match(/[a-z][a-z0-9_]{3,}/g) ?? []).filter(term => !['with', 'from', 'that', 'this', 'want', 'more', 'learn', 'about', 'questions'].includes(term));
+  const terms = (`${context.settings.interests} ${context.learningPlan?.goal ?? ''} ${context.learningPlan?.step.objective ?? ''}`.toLowerCase().match(/[a-z][a-z0-9_]{3,}/g) ?? []).filter(term => !['with', 'from', 'that', 'this', 'want', 'more', 'learn', 'about', 'questions'].includes(term));
   const score = (id: string) => {
     const concept = graph.concepts.find(item => item.id === id)!;
     const record = memory.find(item => item.id === id);
     const text = `${concept.name} ${concept.description} ${concept.domainTags.join(' ')}`.toLowerCase();
     return (context.focus?.concept.id === id ? 1000 : 0) + terms.filter(term => text.includes(term)).length * 12
       + Object.keys(record?.contextPractice ?? {}).filter(id => context.settings.preferredContexts?.includes(id)).length * 4
-      + Math.min(8, record?.practice?.challenging ?? 0) + (!record?.exposures && !record?.coverage?.answered && knowledgeKind(concept) !== 'topic' ? 3 : 0);
+      + (!record?.exposures && !record?.coverage?.answered && knowledgeKind(concept) !== 'topic' ? 3 : 0);
   };
   const canonical = graph.concepts.filter(item => canonicalId(item.id, graph.aliases) === item.id);
   const ranked = [...canonical].sort((a, b) => score(b.id) - score(a.id));
