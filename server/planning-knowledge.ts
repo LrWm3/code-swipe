@@ -1,5 +1,6 @@
 import type { TutorContext } from '../src/types.ts';
 import { canonicalId } from './knowledge-graph.ts';
+import { knowledgeKind } from '../src/knowledge-organization.ts';
 
 /** Supply a relevant neighborhood plus older alternatives, within a byte budget. */
 export function selectPlanningKnowledge(context: TutorContext) {
@@ -12,7 +13,7 @@ export function selectPlanningKnowledge(context: TutorContext) {
     const text = `${concept.name} ${concept.description} ${concept.domainTags.join(' ')}`.toLowerCase();
     return (context.focus?.concept.id === id ? 1000 : 0) + terms.filter(term => text.includes(term)).length * 12
       + Object.keys(record?.contextPractice ?? {}).filter(id => context.settings.preferredContexts?.includes(id)).length * 4
-      + Math.min(8, record?.practice?.challenging ?? 0) + (!record?.exposures ? 3 : 0);
+      + Math.min(8, record?.practice?.challenging ?? 0) + (!record?.exposures && !record?.coverage?.answered && knowledgeKind(concept) !== 'topic' ? 3 : 0);
   };
   const canonical = graph.concepts.filter(item => canonicalId(item.id, graph.aliases) === item.id);
   const ranked = [...canonical].sort((a, b) => score(b.id) - score(a.id));
@@ -32,10 +33,10 @@ export function selectPlanningKnowledge(context: TutorContext) {
     if (bytes + size <= 110_000) { bounded.push(item); bytes += size; }
   }
   // The compact index prevents duplication of an identity outside the selected neighborhood.
-  const conceptIndex = canonical.map(({ id, name, scope, contextIds, aliases, domainTags }) => ({ id, name, scope, contextIds, aliases, domainTags }));
+  const conceptIndex = canonical.map(({ id, name, kind, scope, contextIds, aliases, domainTags }) => ({ id, name, kind: kind ?? 'skill', scope, contextIds, aliases, domainTags }));
   return { graph: { ...graph, concepts: graph.concepts.filter(item => selected.has(canonicalId(item.id, graph.aliases))), relationships: graph.relationships.filter(item => selected.has(item.fromId) && (item.kind === 'application' || selected.has(item.toId))), history: graph.history.slice(-20) }, memory: bounded, conceptIndex };
 }
 
 function selectRecord(record: NonNullable<TutorContext['curriculum']>['concepts'][number]) {
-  return { id: record.id, name: record.name, summary: record.summary, practice: record.practice, contextPractice: record.contextPractice };
+  return { id: record.id, name: record.name, kind: record.definition?.kind ?? 'skill', summary: record.summary, coverage: record.coverage, practice: record.practice, contextPractice: record.contextPractice };
 }

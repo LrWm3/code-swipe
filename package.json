@@ -12,6 +12,7 @@
     "retrofit:presentation": "tsx scripts/retrofit-presentation.ts",
     "retrofit:skills": "tsx scripts/retrofit-skills.ts",
     "migrate:knowledge": "tsx scripts/migrate-knowledge.ts",
+    "migrate:organization": "tsx scripts/migrate-organization.ts",
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts"
   },
   "dependencies": {

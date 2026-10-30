@@ -53,6 +53,18 @@ Reflective planning supplies a relevant graph neighborhood, older alternatives, 
 
 Notebook version 2 adds graph metadata without changing sealed lessons. Startup verifies all plan hashes before migration, backs up state and plan files, maps historical languages to contexts, and reconstructs assessments from eligible evidence. `npm run migrate:knowledge -- --data-dir PATH` previews the migration; `--apply` performs it with the server stopped. It is idempotent. Single-language clients remain supported for settings and guide/practice requests through compatibility mapping.
 
+## Knowledge organization
+
+Version 3 classifies knowledge records as topics, concepts, techniques, specific skills, or representations. Topics are groupings rather than assessable capabilities; the validator rejects topic targets, topic familiarity claims, and topics masquerading as prerequisites. `part-of` runs from a child record to its topic. `uses` links an assessable method or skill to the concepts it draws on, separately from prerequisites. Grouping and composition each remain acyclic; multiple topic memberships are allowed.
+
+The reviewed migration classifies the existing 24 records and adds six topics and eight explanatory concepts. It preserves every original record ID and all sealed artifacts, answers, exclusions, hypotheses, guide events, and contextual evidence. The organizing catalog is a port of existing material; fresh notebooks start without it, and the agent can create further topics organically. Unrecognized historical records remain visible for later organization.
+
+Related coverage is derived from unflagged, meaningful archived skill attributions and deduplicated by answer across all linked components. It never promotes parent familiarity or produces direct supporting evidence. The tutor sees both coverage and the original contextual evidence, so creating a parent record does not imply the learner needs to start that subject again. Pure presentation or threshold variations normally remain practice, transfer, composition, or diagnostic probes on existing identities.
+
+Notebook groups records under topics, with context and knowledge-kind filters. Narrow skills link to reusable conceptual guides; techniques and representations retain their own guides. Before-lesson previews label the type of each idea and avoid describing every item as a new concept. Archived preview and review metadata are derived without rewriting committed questions. Hypotheses about learner misconceptions remain separate from knowledge definitions.
+
+`npm run migrate:organization -- --data-dir PATH` is a dry run. With the server stopped, `--apply` validates all plan hashes, backs up state and plans, and atomically saves the metadata upgrade. Startup performs the same migration after the version-2 upgrade when necessary. Repeating it leaves the notebook unchanged.
+
 ## Execution boundary
 
 The app supports pure synchronous JavaScript, Python, and Rust functions with JSON-compatible fixture data. Missing language metadata on sealed older lessons means JavaScript; those artifacts are never rewritten. New questions declare a descriptive `signature` with a function name and ordered parameter names. Each fixture's `inputJson` encodes the positional argument array: `sumReadings(readings)` receives `[[1, 2]]`, while `lastLowStockIndex(counts, threshold)` receives `[[4, 1, 3], 2]`. Candidate and reference declarations must match the signature and share conventional documentation: JSDoc for JavaScript, a Python docstring, or Rust `///` comments. Input constraints belong in that documentation; natural task descriptions explain behavior. Legacy sealed JavaScript questions without a signature still execute as `solve(input)`.

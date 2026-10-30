@@ -1,12 +1,14 @@
 import type { ConceptUpdate, KnowledgeConcept, KnowledgeGraph, KnowledgePlan, ProposedLesson, StoreData, TutorContext } from '../src/types.ts';
 import { BASE_CONTEXTS } from '../src/learning-contexts.ts';
+import { KNOWLEDGE_KINDS } from '../src/types.ts';
+import { knowledgeKind } from '../src/knowledge-organization.ts';
 
 export const normalizedName = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 export const validId = (value: string) => /^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(value);
 
 export function legacyDefinition(concept: Pick<ConceptUpdate, 'id' | 'name' | 'description' | 'representations'>): KnowledgeConcept {
   const context = /^(python|rust|javascript)[-_]/.exec(concept.id)?.[1];
-  return { id: concept.id, name: concept.name, description: concept.description, representations: [...concept.representations], aliases: [], domainTags: [], scope: context ? 'context-specific' : 'general', contextIds: context ? [context] : [] };
+  return { id: concept.id, kind: 'skill', name: concept.name, description: concept.description, representations: [...concept.representations], aliases: [], domainTags: [], scope: context ? 'context-specific' : 'general', contextIds: context ? [context] : [] };
 }
 
 export function canonicalId(id: string, aliases: Record<string, string> = {}): string {
@@ -40,7 +42,7 @@ export function buildKnowledgeGraph(data: StoreData): KnowledgeGraph {
       }
     }
     for (const context of lesson.curriculum?.knowledge?.contexts ?? []) contexts.set(context.id, structuredClone(context));
-    for (const concept of lesson.curriculum?.knowledge?.concepts ?? []) concepts.set(concept.id, structuredClone(concept));
+    for (const concept of lesson.curriculum?.knowledge?.concepts ?? []) concepts.set(concept.id, { ...concepts.get(concept.id), ...structuredClone(concept), kind: concept.kind ?? concepts.get(concept.id)?.kind ?? 'skill' });
     for (const relationship of lesson.curriculum?.knowledge?.relationships ?? []) relationships.set(relationship.id, structuredClone(relationship));
   }
   const history = structuredClone(data.graphRevisions ?? []);
@@ -88,23 +90,32 @@ export function validateKnowledgePlan(plan: KnowledgePlan, context: TutorContext
   }
   const scopes = new Map<string, string>();
   for (const item of graph.concepts) {
+    if (!KNOWLEDGE_KINDS.includes(knowledgeKind(item))) throw new Error(`Knowledge record ${item.id} needs a valid kind.`);
     const existingDefinition = previous.concepts.find(concept => concept.id === item.id);
+    if (existingDefinition && (knowledgeKind(existingDefinition) === 'topic') !== (knowledgeKind(item) === 'topic')) throw new Error('Keep grouping topics separate from assessable knowledge identities.');
     if (existingDefinition && (existingDefinition.scope !== item.scope || [...existingDefinition.contextIds].sort().join(',') !== [...item.contextIds].sort().join(','))) throw new Error(`Keep concept ${item.id}'s meaning and scope stable; introduce a separate specialization instead.`);
     if (existingDefinition && normalizedName(existingDefinition.name) !== normalizedName(item.name) && !item.aliases.some(alias => normalizedName(alias) === normalizedName(existingDefinition.name))) throw new Error(`Retain ${existingDefinition.name} as an alias when refining the name of ${item.id}.`);
     unique(item.contextIds, `concept ${item.id} contexts`);
     if (item.contextIds.some(id => !contexts.has(id)) || (item.scope === 'context-specific' && !item.contextIds.length) || (item.scope === 'general' && item.contextIds.length)) throw new Error(`Concept ${item.id} needs a consistent scope and existing contexts.`);
-    const identity = `${normalizedName(item.name)}:${item.scope}:${[...item.contextIds].sort().join(',')}:${[...item.domainTags].map(normalizedName).sort().join(',')}`;
+    const identity = `${knowledgeKind(item)}:${normalizedName(item.name)}:${item.scope}:${[...item.contextIds].sort().join(',')}:${[...item.domainTags].map(normalizedName).sort().join(',')}`;
     const existing = scopes.get(identity);
     if (existing && canonicalId(existing, graph.aliases) !== canonicalId(item.id, graph.aliases)) throw new Error(`Concept ${item.id} duplicates ${existing}; reuse its identity or declare an equivalent-concept merge.`);
     scopes.set(identity, item.id);
   }
   const hierarchical = new Map<string, string[]>();
+  const grouping = new Map<string, string[]>();
+  const components = new Map<string, string[]>();
   for (const relation of graph.relationships) {
     if (!definitions.has(relation.fromId) || !(relation.kind === 'application' ? contexts.has(relation.toId) : definitions.has(relation.toId)) || relation.contextIds.some(id => !contexts.has(id))) throw new Error(`Relationship ${relation.id} has an unknown endpoint or context.`);
     const from = canonicalId(relation.fromId, graph.aliases);
     const to = relation.kind === 'application' ? relation.toId : canonicalId(relation.toId, graph.aliases);
     if (relation.active && relation.kind !== 'application' && from === to) throw new Error(`Relationship ${relation.id} cannot link a concept to itself.`);
     if (relation.active && ['prerequisite', 'specialization'].includes(relation.kind)) hierarchical.set(from, [...hierarchical.get(from) ?? [], to]);
+    if (relation.kind === 'part-of' && knowledgeKind(definitions.get(relation.toId)!) !== 'topic') throw new Error('part-of must link a record to a grouping topic.');
+    if (relation.kind === 'uses' && (knowledgeKind(definitions.get(relation.fromId)!) === 'topic' || knowledgeKind(definitions.get(relation.toId)!) === 'topic')) throw new Error('uses links assessable concepts, techniques, skills, or representations; group topics with part-of.');
+    if (relation.kind === 'prerequisite' && [definitions.get(relation.fromId)!, definitions.get(relation.toId)!].some(item => knowledgeKind(item) === 'topic')) throw new Error('A curriculum grouping is not a learner prerequisite.');
+    if (relation.active && relation.kind === 'part-of') grouping.set(from, [...grouping.get(from) ?? [], to]);
+    if (relation.active && relation.kind === 'uses') components.set(from, [...components.get(from) ?? [], to]);
   }
   const checkCycles = (edges: Map<string, string[]>, label: string) => {
     const seen = new Set<string>(), visiting = new Set<string>();
@@ -117,12 +128,15 @@ export function validateKnowledgePlan(plan: KnowledgePlan, context: TutorContext
   };
   checkCycles(new Map(graph.contexts.map(item => [item.id, item.parentIds])), 'Context hierarchy');
   checkCycles(hierarchical, 'Knowledge hierarchy');
+  checkCycles(grouping, 'Topic grouping');
+  checkCycles(components, 'Knowledge composition');
   const merged = new Set<string>();
   for (const merge of plan.merges) {
     const from = definitions.get(merge.fromId), to = definitions.get(merge.toId);
     if (!from || !to || from.id === to.id || merged.has(from.id) || Object.hasOwn(previous.aliases, from.id)) throw new Error('Merge needs distinct existing identities, each source at most once.');
     merged.add(from.id);
     if (from.scope !== to.scope || [...from.contextIds].sort().join(',') !== [...to.contextIds].sort().join(',')) throw new Error('Merge only equivalent concepts with identical scope; retain general concepts and specializations separately.');
+    if (knowledgeKind(from) !== knowledgeKind(to)) throw new Error('Merge only equivalent records at the same knowledge level.');
     if (graph.relationships.some(edge => edge.active && ['prerequisite', 'specialization'].includes(edge.kind) && [edge.fromId, edge.toId].includes(from.id) && [edge.fromId, edge.toId].includes(to.id))) throw new Error('A prerequisite or specialization is not a duplicate concept.');
     if (previous.concepts.some(item => item.id === from.id) && !previous.concepts.some(item => item.id === to.id)) throw new Error('Keep the existing identity as the canonical merge target.');
   }

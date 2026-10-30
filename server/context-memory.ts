@@ -2,6 +2,7 @@ import type { ConceptRecord, ContextPractice, CurriculumMemory, SkillEvidence, S
 import { questionContext, questionLanguage } from '../src/learning-contexts.ts';
 import { buildKnowledgeGraph, canonicalId } from './knowledge-graph.ts';
 import { familiaritySupport, independentSupport, interpretSkill, questionSkills } from './skill-evidence.ts';
+import { componentIds, knowledgeKind } from '../src/knowledge-organization.ts';
 
 const later = (left: string | null, right: string) => left === null || Date.parse(right) > Date.parse(left) ? right : left;
 const emptyPractice = () => ({ targeted: 0, exercised: 0, incidental: 0, supporting: 0, challenging: 0, inconclusive: 0, lastTargetedAt: null, lastExercisedAt: null, lastIndependentSuccessAt: null });
@@ -107,6 +108,18 @@ export function contextualizeMemory(data: StoreData, legacy: CurriculumMemory): 
     // Legacy field is encounter compatibility only; contextual assessments are authoritative.
     record.familiarity = record.practice!.supporting ? 'developing' : record.exposures ? 'introduced' : 'unknown';
     record.summary = Object.values(record.contextPractice!).map(item => `${graph.contexts.find(context => context.id === item.contextId)?.name ?? item.contextId}: ${item.familiarity}`).join('; ') || 'No answered evidence yet.';
+    const members = new Set(componentIds(graph, record.id).filter(id => id !== record.id));
+    if (members.size || knowledgeKind(record.definition!) === 'topic') {
+      const attempts = new Map<string, ConceptRecord['evidence'][number]>();
+      const coveredIds = new Set<string>();
+      for (const id of members) for (const [key, values] of allEvidence) if (key.startsWith(`${id}\0`)) for (const item of values) {
+        if (item.role === 'incidental' || item.source === 'legacy') continue;
+        attempts.set(item.attemptId, item); coveredIds.add(id);
+      }
+      const evidence = [...attempts.values()];
+      record.coverage = { recordIds: [...coveredIds], answered: evidence.length, contextIds: [...new Set(evidence.map(item => item.contextId!))], lastSeenAt: evidence.reduce<string | null>((at, item) => later(at, item.answeredAt), null) };
+      if (!record.exposures) record.summary = evidence.length ? `${evidence.length} answered cards across ${coveredIds.size} related records; no direct assessment.` : 'No related practice yet.';
+    }
   }
   return { ...legacy, concepts: [...records.values()], variants: legacy.variants.map(item => ({ ...item, conceptIds: [...new Set(item.conceptIds.map(resolve))] })) };
 }

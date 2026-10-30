@@ -219,5 +219,5 @@ export function buildCurriculumMemory(data: StoreData): CurriculumMemory {
       lessonId: lesson.id, objective: lesson.objective, answered: answeredByLesson.get(lesson.id) ?? 0,
     })),
   };
-  return data.version === 2 || data.lessons.some(lesson => lesson.curriculum?.knowledge) ? contextualizeMemory(data, memory) : memory;
+  return data.version >= 2 || data.lessons.some(lesson => lesson.curriculum?.knowledge) ? contextualizeMemory(data, memory) : memory;
 }

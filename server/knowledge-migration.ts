@@ -2,7 +2,7 @@ import type { StoreData } from '../src/types.ts';
 import { buildKnowledgeGraph } from './knowledge-graph.ts';
 
 export function migrateKnowledge(data: StoreData, backupDirectory: string, at = new Date().toISOString()) {
-  if (data.version === 2) return { data, report: { needed: false, concepts: data.knowledgeSeed?.concepts.length ?? 0, lessons: data.lessons.length, attempts: data.attempts.length } };
+  if (data.version >= 2) return { data, report: { needed: false, concepts: data.knowledgeSeed?.concepts.length ?? 0, lessons: data.lessons.length, attempts: data.attempts.length } };
   const graph = buildKnowledgeGraph(data);
   const updated: StoreData = { ...structuredClone(data), version: 2,
     settings: { ...data.settings, preferredContexts: data.settings.preferredContexts ?? [data.settings.language ?? 'javascript'], excludedContexts: data.settings.excludedContexts ?? [] },

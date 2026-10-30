@@ -1,7 +1,11 @@
 export type ProviderId = 'codex' | 'opencode' | 'demo';
 export type Language = 'javascript' | 'python' | 'rust';
 export type Familiarity = 'unknown' | 'introduced' | 'developing' | 'familiar';
+export const KNOWLEDGE_KINDS = ['topic', 'concept', 'technique', 'skill', 'representation'] as const;
+export type KnowledgeKind = typeof KNOWLEDGE_KINDS[number];
 export interface KnowledgeConcept {
+  // Missing only in archived definitions from before knowledge organization.
+  kind?: KnowledgeKind;
   id: string;
   name: string;
   description: string;
@@ -20,7 +24,7 @@ export interface LearningContext {
 }
 export interface KnowledgeRelationship {
   id: string;
-  kind: 'prerequisite' | 'specialization' | 'related' | 'application';
+  kind: 'prerequisite' | 'specialization' | 'related' | 'application' | 'part-of' | 'uses';
   fromId: string;
   toId: string;
   contextIds: string[];
@@ -144,6 +148,7 @@ export interface CurriculumPlan {
   sequenceRationale: string;
 }
 export interface ConceptRecord extends ConceptUpdate {
+  coverage?: { recordIds: string[]; answered: number; contextIds: string[]; lastSeenAt: string | null };
   definition?: KnowledgeConcept;
   contextPractice?: Record<string, ContextPractice>;
   summary?: string;
@@ -272,7 +277,7 @@ export interface Lesson extends Omit<ProposedLesson, 'questions'> {
   predictionHash: string;
   focus?: { conceptId: string; contextId?: string; parentLessonId: string };
 }
-export interface GuideConcept { id: string; name: string; description: string; contextId?: string }
+export interface GuideConcept { id: string; name: string; description: string; contextId?: string; kind?: KnowledgeKind; practiceNames?: string[] }
 export interface ConceptGuide {
   contextId?: string;
   verification?: Verification;
@@ -350,7 +355,8 @@ export interface DiscussionContext {
   discussions: Discussion[];
 }
 export interface StoreData {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
+  organizationMigration?: { fromVersion: 2; at: string; backupDirectory: string; classifiedIds: string[]; addedIds: string[] };
   knowledgeSeed?: Pick<KnowledgeGraph, 'concepts' | 'contexts' | 'relationships'>;
   graphRevisions?: GraphRevision[];
   migration?: { fromVersion: 1; at: string; backupDirectory: string };

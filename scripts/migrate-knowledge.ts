@@ -11,7 +11,7 @@ const directory = resolve(args.includes('--data-dir') ? args[args.indexOf('--dat
 const state = join(directory, 'state.json');
 const original = readFileSync(state, 'utf8');
 const data: StoreData = JSON.parse(original);
-if (![1, 2].includes(data.version)) throw new Error('Unsupported notebook version.');
+if (![1, 2, 3].includes(data.version)) throw new Error('Unsupported notebook version.');
 for (const lesson of data.lessons) {
   const saved: Lesson = JSON.parse(readFileSync(join(directory, 'plans', `${lesson.id}.json`), 'utf8'));
   if (lessonHash(lesson) !== lesson.predictionHash || lessonHash(saved) !== lesson.predictionHash) throw new Error(`Plan integrity check failed: ${lesson.id}`);

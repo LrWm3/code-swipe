@@ -13,6 +13,8 @@ import { BASE_CONTEXTS, guideContext, questionContext, questionLanguage } from '
 import { buildKnowledgeGraph, canonicalId, validId } from './knowledge-graph.ts';
 import { migrateKnowledge } from './knowledge-migration.ts';
 import { executionEnvironments } from './environments.ts';
+import { migrateOrganization } from './organization-migration.ts';
+import { knowledgeKind, teachingAnchor } from '../src/knowledge-organization.ts';
 
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -82,7 +84,7 @@ export class LocalStore {
     if (existsSync(this.file)) {
       try {
         this.data = JSON.parse(readFileSync(this.file, 'utf8'));
-        if (![1, 2].includes(this.data.version) || !Array.isArray(this.data.lessons) || !Array.isArray(this.data.attempts)) throw new Error('Unsupported data format.');
+        if (![1, 2, 3].includes(this.data.version) || !Array.isArray(this.data.lessons) || !Array.isArray(this.data.attempts)) throw new Error('Unsupported data format.');
         // Retire the old four-card setting without changing any sealed lesson.
         if (this.data.settings?.batchSize === 4) this.data.settings = { ...this.data.settings, batchSize: DEFAULT_LESSON_SIZE };
         this.data.settings = parseSettings(this.data.settings);
@@ -121,12 +123,20 @@ export class LocalStore {
           this.data = migrateKnowledge(this.data, backupDirectory).data;
           this.persist();
         }
+        if (this.data.version === 2) {
+          const backupDirectory = join(this.directory, 'backups', `organization-v2-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+          mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+          copyFileSync(this.file, join(backupDirectory, 'state.json'));
+          cpSync(join(this.directory, 'plans'), join(backupDirectory, 'plans'), { recursive: true });
+          this.data = migrateOrganization(this.data, backupDirectory).data;
+          this.persist();
+        }
         buildKnowledgeGraph(this.data);
       } catch (error) {
         throw new Error(`Could not read local history at ${this.file}. Nothing was reset. Check state.backup.json and restore a matching set of plan files. ${error instanceof Error ? error.message : ''}`);
       }
     } else {
-      this.data = { version: 2, settings: parseSettings(DEFAULT_SETTINGS), lessons: [], attempts: [], feedback: [], reviewSessions: [], discussions: [], graphRevisions: [] };
+      this.data = { version: 3, settings: parseSettings(DEFAULT_SETTINGS), lessons: [], attempts: [], feedback: [], reviewSessions: [], discussions: [], graphRevisions: [] };
       this.persist();
     }
   }
@@ -162,7 +172,15 @@ export class LocalStore {
     const graph = buildKnowledgeGraph(this.data);
     id = canonicalId(id, graph.aliases);
     const definition = graph.concepts.find(item => item.id === id);
-    return definition ? { id, name: definition.name, description: definition.description } : null;
+    return definition ? { id, name: definition.name, description: definition.description, kind: knowledgeKind(definition) } : null;
+  }
+
+  teachingConcept(id: string, contextId: string): GuideConcept | null {
+    const graph = buildKnowledgeGraph(this.data);
+    const target = teachingAnchor(graph, id);
+    const original = graph.concepts.find(item => item.id === canonicalId(id, graph.aliases));
+    return target ? { id: target.id, name: target.name, description: target.description, kind: knowledgeKind(target), contextId,
+      ...(target.id !== original?.id ? { practiceNames: [original!.name] } : {}) } : null;
   }
 
   undoConceptMerge(id: string): void {
@@ -188,10 +206,14 @@ export class LocalStore {
     const concepts: GuideConcept[] = [];
     const seen = new Set<string>();
     for (const { id, contextId } of directions) {
-      const concept = this.concept(id);
+      const concept = this.teachingConcept(id, contextId);
       if (!concept) continue;
       const key = `${concept.id}\0${contextId}`;
       if (!seen.has(key)) { concepts.push({ ...concept, contextId }); seen.add(key); }
+      else {
+        const previous = concepts.find(item => item.id === concept.id && item.contextId === contextId)!;
+        previous.practiceNames = [...new Set([...(previous.practiceNames ?? []), ...(concept.practiceNames ?? [])])];
+      }
     }
     return concepts;
   }
@@ -415,7 +437,8 @@ export class LocalStore {
     // Planning metadata may identify a future mirror and reveal its verdict.
     const retro = this.data.skillRetrofits?.flatMap(item => item.questions).find(item => item.exerciseId === question.id && item.lessonId === lesson.id);
     const ids = question.plan?.skillUses?.filter(use => use.role !== 'incidental').map(use => use.conceptId) ?? retro?.uses.filter(use => use.role !== 'incidental').map(use => use.conceptId) ?? question.plan?.conceptIds ?? [];
-    const relatedConcepts = [...new Set(ids)].map(id => this.concept(id)).filter((item): item is GuideConcept => Boolean(item)).slice(0, 4).map(concept => ({ ...concept, contextId: questionContext(question, lesson) }));
+    const related = [...new Set(ids)].map(id => this.teachingConcept(id, questionContext(question, lesson))).filter((item): item is GuideConcept => Boolean(item));
+    const relatedConcepts = [...new Map(related.map(item => [item.id, item])).values()].slice(0, 4);
     const afterPlan = (at: string) => Date.parse(at) >= Date.parse(lesson.createdAt) && Date.parse(at) <= Date.parse(attempt.answeredAt);
     const opened = (this.data.guideEvents ?? []).filter(event => event.action === 'opened' && event.lessonId === lesson.id && afterPlan(event.at));
     const practiced = this.data.lessons.filter(item => item.focus?.parentLessonId === lesson.id && this.data.attempts.some(answer => answer.lessonId === item.id && afterPlan(answer.answeredAt)));

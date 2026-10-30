@@ -166,7 +166,7 @@ test('given a version-one notebook, when migrating and reopening, then hashes pl
   const bytes = JSON.stringify(lesson);
   writeFileSync(join(directory, 'state.json'), JSON.stringify(data)); writeFileSync(join(directory, 'plans', `${lesson.id}.json`), bytes);
   const store = new LocalStore(directory);
-  assert.equal(store.snapshot().version, 2); assert.equal(store.pendingQuestion()?.id, 'old-0');
+  assert.equal(store.snapshot().version, 3); assert.equal(store.pendingQuestion()?.id, 'old-0');
   assert.equal(readFileSync(join(directory, 'plans', `${lesson.id}.json`), 'utf8'), bytes);
   assert.equal(readFileSync(join(store.snapshot().migration!.backupDirectory, 'plans', `${lesson.id}.json`), 'utf8'), bytes);
   assert.equal(new LocalStore(directory).snapshot().migration!.backupDirectory, store.snapshot().migration!.backupDirectory);

@@ -1,6 +1,6 @@
 import type { ProposedLesson, TutorContext } from '../src/types.ts';
 import { LESSON_SIZES } from '../src/lesson-sizes.ts';
-import { PURPOSES } from '../src/types.ts';
+import { PURPOSES, KNOWLEDGE_KINDS } from '../src/types.ts';
 import { buildKnowledgeTutorPrompt } from './knowledge-prompts.ts';
 
 type Schema = {
@@ -76,9 +76,9 @@ export const contextualQuestionPlanSchema = { ...questionPlanSchema, properties:
   skillUses: list(object({ ...questionPlanSchema.properties!.skillUses.items!.properties!, contextId: id() }), 12, 1),
 } };
 export const knowledgeSchema = object({
-  concepts: list(object({ id: id(), name: text(140), description: text(600), aliases: list(text(140), 8), domainTags: list(text(80), 6), scope: choice(['general', 'context-specific']), contextIds: list(id(), 6), representations: list(text(140), 6, 1) }), 16),
+  concepts: list(object({ id: id(), kind: choice(KNOWLEDGE_KINDS), name: text(140), description: text(600), aliases: list(text(140), 8), domainTags: list(text(80), 6), scope: choice(['general', 'context-specific']), contextIds: list(id(), 6), representations: list(text(140), 6, 1) }), 16),
   contexts: list(object({ id: id(), name: text(140), description: text(600), parentIds: list(id(), 4), language: { type: ['string', 'null'], enum: ['javascript', 'python', 'rust', null] } }), 6),
-  relationships: list(object({ id: id(), kind: choice(['prerequisite', 'specialization', 'related', 'application']), fromId: id(), toId: id(), contextIds: list(id(), 6), rationale: text(700), active: { type: 'boolean' } }), 24),
+  relationships: list(object({ id: id(), kind: choice(['prerequisite', 'specialization', 'related', 'application', 'part-of', 'uses']), fromId: id(), toId: id(), contextIds: list(id(), 6), rationale: text(700), active: { type: 'boolean' } }), 24),
   assessments: list(object({ conceptId: id(), contextId: id(), familiarity: choice(['unknown', 'introduced', 'developing', 'familiar']), evidenceAttemptIds: list(text(120), 12), uncertainty: text(700), nextProbe: text(700) }), 16),
   merges: list(object({ fromId: id(), toId: id(), reason: text(700) }), 4),
 });

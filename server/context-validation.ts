@@ -4,6 +4,7 @@ import { contextualCurriculumSchema, contextualQuestionPlanSchema, validateSchem
 import { executionEnvironments } from './environments.ts';
 import { contextIsExcluded, isLanguage, questionContext } from '../src/learning-contexts.ts';
 import { familiaritySupport } from './skill-evidence.ts';
+import { knowledgeKind } from '../src/knowledge-organization.ts';
 
 export function prepareContextualLesson(lesson: ProposedLesson, context: TutorContext): { lesson: ProposedLesson; graph: KnowledgeGraph } {
   validateSchema(lesson.curriculum, contextualCurriculumSchema, 'curriculum');
@@ -29,6 +30,7 @@ export function validateContextualQuestions(lesson: ProposedLesson, context: Tut
       // A context on a dependency is not evidence in that context. It must actually be on the card.
       if (use.contextId !== question.contextId) throw new Error(`${at} skill contexts must describe this card's actual primary context; use a separate transfer card for another context.`);
       const definition = graph.concepts.find(item => item.id === use.conceptId)!;
+      if (knowledgeKind(definition) === 'topic') throw new Error(`${at} cannot assess a grouping topic; attribute evidence to an actual concept, technique, skill, or representation.`);
       if (definition.scope === 'context-specific' && !definition.contextIds.some(scope => contextIsExcluded(use.contextId!, graph.contexts, [scope]))) throw new Error(`${at} uses a context-specific concept outside its defining context or a specialization.`);
     }
     const verification = question.verification;
@@ -58,6 +60,7 @@ export function validateContextualQuestions(lesson: ProposedLesson, context: Tut
     const key = `${assessment.conceptId}\0${assessment.contextId}`;
     if (assessments.has(key) || !definitions.has(assessment.conceptId) || !contexts.has(assessment.contextId)) throw new Error('Assessment needs a unique existing concept/context pair.');
     assessments.add(key);
+    if (knowledgeKind(graph.concepts.find(item => item.id === assessment.conceptId)!) === 'topic') throw new Error('Do not assess familiarity for a grouping topic; related practice is coverage only.');
     const concept = context.curriculum?.concepts.find(item => canonicalId(item.id, graph.aliases) === assessment.conceptId);
     const evidence = new Map((context.curriculum?.concepts.filter(item => canonicalId(item.id, graph.aliases) === assessment.conceptId) ?? []).flatMap(item => item.contextPractice?.[assessment.contextId]?.evidence ?? []).map(item => [item.attemptId, item]));
     // Recent raw answers override bounded memory and exclusions.
@@ -80,6 +83,7 @@ export function validateContextualQuestions(lesson: ProposedLesson, context: Tut
     if (frontier.has(key) || !contexts.has(entry.contextId!) || !definitions.has(entry.conceptId)) throw new Error('Frontier entries need unique existing concept/context pairs.');
     frontier.add(key);
     const targeted = lesson.questions.some(question => question.contextId === entry.contextId && question.plan?.conceptIds.includes(entry.conceptId));
+    if (knowledgeKind(graph.concepts.find(item => item.id === entry.conceptId)!) === 'topic' && entry.decision === 'introduce') throw new Error('An introduced frontier must name a teachable concept or technique, not just a broad topic.');
     if ((entry.decision === 'introduce' && !targeted) || (entry.decision === 'defer' && targeted)) throw new Error('Frontier introduce/defer decisions must match targeted concept/context pairs.');
     const executed = lesson.questions.filter(question => question.contextId === entry.contextId && question.plan?.conceptIds.includes(entry.conceptId));
     if (executed.length && !executed.some(question => (question.verification?.mode === 'execute' ? 'executed' : 'unverified') === entry.verification)) throw new Error('Frontier verification must describe a path used by its targeted cards.');

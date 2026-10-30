@@ -37,7 +37,7 @@ export class TutorService {
     this.requireIdle();
     const parent = this.store.activeLesson();
     const concept = focusRequest ? this.store.concept(focusRequest.conceptId) : null;
-    if (focusRequest && (!concept || !parent || parent.focus || ![4, 6].includes(focusRequest.length) || (focusRequest.language !== undefined && !['javascript', 'python', 'rust'].includes(focusRequest.language)))) throw new AppError('Choose a concept and 4 or 6 cards while a main lesson is open.', 400);
+    if (focusRequest && (!concept || concept.kind === 'topic' || !parent || parent.focus || ![4, 6].includes(focusRequest.length) || (focusRequest.language !== undefined && !['javascript', 'python', 'rust'].includes(focusRequest.language)))) throw new AppError('Choose a teachable concept, technique, skill, or representation and 4 or 6 cards while a main lesson is open.', 400);
     if (focusRequest && this.store.snapshot().settings.provider === 'demo' && !['demo-code-review', 'python-demo-code-review', 'rust-demo-code-review'].includes(concept?.id ?? '')) throw new AppError('Choose Codex or OpenCode in Setup to generate focused practice for this concept.');
     if (!focusRequest && this.store.pendingQuestion()) throw new AppError('Finish the current lesson before planning another.', 409);
     let context = this.store.context();
@@ -111,6 +111,7 @@ export class TutorService {
     language = definition.language ?? (isLanguage(selectedContext) ? selectedContext : 'javascript');
     const concept = this.store.concept(conceptId);
     if (!concept) throw new AppError('Concept not found.', 404);
+    if (concept.kind === 'topic') throw new AppError('Choose a concept or technique within this topic for a guide.');
     conceptId = concept.id;
     if (this.state().guides?.some(item => item.conceptId === conceptId && guideContext(item) === selectedContext)) return;
     const curated = BASE_CONTEXTS.slice(0, 3).some(item => item.id === selectedContext) ? reviewedGuide(concept, language) : null;
