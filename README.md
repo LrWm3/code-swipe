@@ -1,8 +1,10 @@
 # Code Swipe — local tutor lab
 
+Code Swipe currently supports **local use only**. Run the app and its server on your own computer; Codex/OpenCode may still use remote model providers.
+
 Read a little code or a proposed technical answer. Swipe right for correct, left for buggy/incorrect, or choose IDK. Keep playing, and open an explanation whenever you want one.
 
-This branch rebuilds Code Swipe around a single teaching agent, powered by your installed **Codex** or **OpenCode** CLI. It keeps a notebook of tentative learner hypotheses, plans short lessons, and commits its predictions *before* you answer. Your answers shape the next lesson. No account system, Firebase, subjects, Elo, or mastery tree.
+Code Swipe is built around a single teaching agent, powered by your installed **Codex** or **OpenCode** CLI. It keeps a notebook of tentative learner hypotheses, plans short lessons, and commits its predictions *before* you answer. Your answers shape the next lesson. No account system, Firebase, subjects, Elo, or mastery tree.
 
 ## Try it
 
