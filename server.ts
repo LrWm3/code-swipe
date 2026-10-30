@@ -32,9 +32,10 @@ export function createApp(service: TutorService) {
   app.get('/api/state', (_req, res) => res.json(service.state()));
   app.put('/api/settings', (req, res) => { service.saveSettings(req.body); res.json(service.state()); });
   app.post('/api/plan', (_req, res) => { service.plan(); res.status(202).json(service.state()); });
-  app.post('/api/concepts/:id/guide', (req, res) => { service.prepareGuide(req.params.id, req.body?.language); res.json(service.state()); });
-  app.post('/api/concepts/:id/events', (req, res) => { service.store.recordGuideEvent(req.params.id, req.body?.action, req.body?.language); res.json(service.state()); });
-  app.post('/api/concepts/:id/practice', (req, res) => { service.plan({ conceptId: req.params.id, length: req.body?.length, language: req.body?.language }); res.status(202).json(service.state()); });
+  app.post('/api/concepts/:id/guide', (req, res) => { service.prepareGuide(req.params.id, req.body?.language, req.body?.contextId); res.json(service.state()); });
+  app.post('/api/concepts/:id/events', (req, res) => { service.store.recordGuideEvent(req.params.id, req.body?.action, req.body?.language, req.body?.contextId); res.json(service.state()); });
+  app.post('/api/concepts/:id/practice', (req, res) => { service.plan({ conceptId: req.params.id, length: req.body?.length, language: req.body?.language, contextId: req.body?.contextId }); res.status(202).json(service.state()); });
+  app.post('/api/knowledge/merges/:id/undo', (req, res) => { service.requireIdle(); service.store.undoConceptMerge(req.params.id); res.json(service.state()); });
   app.post('/api/lessons/:id/start', (req, res) => { service.requireIdle(); service.store.startPreparedLesson(req.params.id); res.json(service.state()); });
   app.post('/api/lessons/resume', (_req, res) => { service.requireIdle(); service.store.resumeParent(); res.json(service.state()); });
   app.post('/api/cancel', (_req, res) => { service.cancel(); res.json(service.state()); });

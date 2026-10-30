@@ -150,17 +150,12 @@ fn encode<T: JsonOutput + ?Sized>(v: &T) -> Option<String> { v.json() }
 `;
 
 const SCRIPT = String.raw`set -u
-IFS= read -r standalone
 IFS= read -r combined
-printf '%s' "$standalone" | base64 -d > /tmp/standalone.rs
 printf '%s' "$combined" | base64 -d > /tmp/exercise.rs
 /usr/bin/timeout 30s rustc --edition=2021 -Awarnings /tmp/exercise.rs -o /tmp/exercise 2>/tmp/compile.err
 status=$?
 if [ "$status" -ne 0 ]; then
   if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then exit 12; fi
-  /usr/bin/timeout 30s rustc --edition=2021 --crate-type=lib -Awarnings --error-format=json /tmp/standalone.rs -o /tmp/standalone.rlib 2>/tmp/standalone.err
-  status=$?
-  if [ "$status" -eq 1 ]; then printf 'STANDALONE_ERROR:'; head -c 64000 /tmp/standalone.err; exit 10; fi
   printf 'COMPILE_ERROR:'; head -c 1500 /tmp/compile.err; exit 10
 fi
 i=0
@@ -170,7 +165,7 @@ while [ "$i" -lt "$1" ]; do
 done`;
 
 export interface RustExecution { actual: JsonValue | null; error: string | null; rustType?: string; compilationError?: string }
-export async function executeRustBatch(code: string, inputs: JsonValue[], path: string, signal: AbortSignal | undefined, signature: FunctionSignature, allowCompileError = false): Promise<RustExecution[]> {
+export async function executeRustBatch(code: string, inputs: JsonValue[], path: string, signal: AbortSignal | undefined, signature: FunctionSignature): Promise<RustExecution[]> {
   const declaration = rustDeclaration(code, signature);
   const cases = inputs.map((input, index) => {
     const args = argumentsFor(input, declaration, signature);
@@ -198,23 +193,8 @@ export async function executeRustBatch(code: string, inputs: JsonValue[], path: 
       if (interrupted) { reject(new Error(`${path}: ${interrupted}; no verdict was accepted.`)); return; }
       if (code !== 0) {
         cleanup();
-        let standalone = '';
-        if (stdout.startsWith('STANDALONE_ERROR:')) {
-          try {
-            const diagnostics = stdout.slice('STANDALONE_ERROR:'.length).trim().split('\n').map(line => JSON.parse(line) as { level?: string; code?: { code?: string } | null; message?: string });
-            const errors = diagnostics.filter(item => item.level === 'error' && !/^aborting due to\b/i.test(item.message ?? ''));
-            const allowed = new Set(['E0308', 'E0277', 'E0382', 'E0499', 'E0502', 'E0505', 'E0506', 'E0507', 'E0515', 'E0596', 'E0597', 'E0599', 'E0716']);
-            const explanation = errors.map(item => `${item.code?.code ? `${item.code.code}: ` : ''}${item.message ?? 'compiler error'}`).join('; ').replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 800);
-            if (allowCompileError && errors.length && errors.every(item => item.code?.code && allowed.has(item.code.code) && typeof item.message === 'string')) {
-              resolve(inputs.map(() => ({ actual: null, error: null, compilationError: explanation })));
-              return;
-            }
-            standalone = `Rust source did not compile${explanation ? `: ${explanation}` : ''}${allowCompileError ? ' (unsupported diagnostic)' : ''}`;
-          } catch { /* Treat malformed diagnostics as a sandbox failure. */ }
-          if (!standalone) standalone = 'Rust source did not compile or used an unsupported diagnostic';
-        }
         const compiler = stdout.startsWith('COMPILE_ERROR:') ? stdout.slice('COMPILE_ERROR:'.length).replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 600) : '';
-        reject(new Error(`${path}: ${compiler ? `Rust compilation failed: ${compiler}` : standalone || 'Rust sandbox timed out or failed'}; no verdict was accepted.`)); return;
+        reject(new Error(`${path}: ${compiler ? `Rust compilation failed: ${compiler}` : 'Rust sandbox timed out or failed'}; no verdict was accepted.`)); return;
       }
       try {
         const lines = stdout.trim().split('\n');
@@ -234,6 +214,6 @@ export async function executeRustBatch(code: string, inputs: JsonValue[], path: 
         resolve(reports.map(report => ({ actual: report.value, error: report.error?.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 240) ?? null, ...(typeof report.rustType === 'string' ? { rustType: report.rustType.slice(0, 400) } : {}) })));
       } catch { reject(new Error(`${path}: Rust sandbox returned invalid or unsupported output; no verdict was accepted.`)); }
     });
-    child.stdin.end(`${Buffer.from(code).toString('base64')}\n${Buffer.from(source).toString('base64')}\n`);
+    child.stdin.end(`${Buffer.from(source).toString('base64')}\n`);
   });
 }

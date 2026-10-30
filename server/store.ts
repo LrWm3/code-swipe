@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync, chmodSync, cpSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import type { AppState, Attempt, Lesson, LessonSummary, Metrics, ProposedLesson, ProviderStatus, Review, ReviewSession, LessonFeedback, Settings, StoreData, TutorContext, ValidationReport, Answer, Job, Discussion, DiscussionContext, ProposedDiscussion } from '../src/types.ts';
 import { parseDiscussionOutput } from './discussion.ts';
@@ -9,6 +9,10 @@ import { buildCurriculumMemory } from './curriculum-memory.ts';
 import { validateRetrofit } from './skill-evidence.ts';
 import { presentationArchiveHash, revisedQuestion, validatePresentationRevision, verifyPresentationBehavior } from './presentation-revisions.ts';
 import type { ConceptGuide, GuideConcept, GuideEvent, Language, PresentationRevision, SkillRetrofit } from '../src/types.ts';
+import { BASE_CONTEXTS, guideContext, questionContext, questionLanguage } from '../src/learning-contexts.ts';
+import { buildKnowledgeGraph, canonicalId, validId } from './knowledge-graph.ts';
+import { migrateKnowledge } from './knowledge-migration.ts';
+import { executionEnvironments } from './environments.ts';
 
 export class AppError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -24,7 +28,15 @@ export function parseSettings(input: unknown): Settings {
   if (typeof data.interests !== 'string' || data.interests.length > 2000) throw new AppError('Keep interests under 2,000 characters.');
   if (!LESSON_SIZES.some(size => size === data.batchSize)) throw new AppError('Choose 6, 8, or 12 exercises per lesson.');
   if (!['reflective', 'baseline'].includes(data.tutorMode)) throw new AppError('Choose reflective or baseline tutor mode.');
-  return { provider: data.provider, language: data.language ?? 'javascript', model: data.model, interests: data.interests.trim(), batchSize: data.batchSize, tutorMode: data.tutorMode };
+  const preferences = (values: unknown, fallback: string[]) => {
+    if (values === undefined) return fallback;
+    if (!Array.isArray(values) || values.length > 16 || values.some(value => typeof value !== 'string' || !validId(value)) || new Set(values).size !== values.length) throw new AppError('Choose up to 16 distinct learning context IDs.');
+    return [...values] as string[];
+  };
+  const preferredContexts = preferences(data.preferredContexts, [data.language ?? 'javascript']);
+  const excludedContexts = preferences(data.excludedContexts, []);
+  if (preferredContexts.some(id => excludedContexts.includes(id))) throw new AppError('A context cannot be both preferred and excluded.');
+  return { provider: data.provider, language: data.language ?? 'javascript', preferredContexts, excludedContexts, model: data.model, interests: data.interests.trim(), batchSize: data.batchSize, tutorMode: data.tutorMode };
 }
 
 export function lessonHash(lesson: Lesson): string {
@@ -35,7 +47,7 @@ export function lessonHash(lesson: Lesson): string {
 export function calculateMetrics(data: StoreData, filter?: Pick<Settings, 'provider' | 'tutorMode' | 'language'>): Metrics {
   const observations = data.attempts.filter(attempt => !attempt.flagged && attempt.answer !== 'idk' && typeof attempt.correct === 'boolean').flatMap(attempt => {
     const lesson = data.lessons.find(item => item.id === attempt.lessonId);
-    if (!lesson || (filter && (lesson.provider !== filter.provider || lesson.tutorMode !== filter.tutorMode || (lesson.language ?? 'javascript') !== (filter.language ?? 'javascript')))) return [];
+    if (!lesson || (filter && (lesson.provider !== filter.provider || lesson.tutorMode !== filter.tutorMode || (data.version === 1 && (lesson.language ?? 'javascript') !== (filter.language ?? 'javascript'))))) return [];
     const question = lesson.questions.find(item => item.id === attempt.exerciseId);
     return question ? [{ p: question.prediction.pCorrect, y: Number(attempt.correct), purposes: question.plan?.purposes ?? [question.purpose] }] : [];
   });
@@ -70,7 +82,7 @@ export class LocalStore {
     if (existsSync(this.file)) {
       try {
         this.data = JSON.parse(readFileSync(this.file, 'utf8'));
-        if (this.data.version !== 1 || !Array.isArray(this.data.lessons) || !Array.isArray(this.data.attempts)) throw new Error('Unsupported data format.');
+        if (![1, 2].includes(this.data.version) || !Array.isArray(this.data.lessons) || !Array.isArray(this.data.attempts)) throw new Error('Unsupported data format.');
         // Retire the old four-card setting without changing any sealed lesson.
         if (this.data.settings?.batchSize === 4) this.data.settings = { ...this.data.settings, batchSize: DEFAULT_LESSON_SIZE };
         this.data.settings = parseSettings(this.data.settings);
@@ -101,11 +113,20 @@ export class LocalStore {
           const artifact = JSON.parse(readFileSync(join(this.directory, 'plans', `${lesson.id}.json`), 'utf8')) as Lesson;
           if (artifact.predictionHash !== lesson.predictionHash || lessonHash(artifact) !== lesson.predictionHash) throw new Error('A plan artifact has changed.');
         }
+        if (this.data.version === 1) {
+          const backupDirectory = join(this.directory, 'backups', `knowledge-v1-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+          mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+          copyFileSync(this.file, join(backupDirectory, 'state.json'));
+          cpSync(join(this.directory, 'plans'), join(backupDirectory, 'plans'), { recursive: true });
+          this.data = migrateKnowledge(this.data, backupDirectory).data;
+          this.persist();
+        }
+        buildKnowledgeGraph(this.data);
       } catch (error) {
         throw new Error(`Could not read local history at ${this.file}. Nothing was reset. Check state.backup.json and restore a matching set of plan files. ${error instanceof Error ? error.message : ''}`);
       }
     } else {
-      this.data = { version: 1, settings: { ...DEFAULT_SETTINGS }, lessons: [], attempts: [], feedback: [], reviewSessions: [], discussions: [] };
+      this.data = { version: 2, settings: parseSettings(DEFAULT_SETTINGS), lessons: [], attempts: [], feedback: [], reviewSessions: [], discussions: [], graphRevisions: [] };
       this.persist();
     }
   }
@@ -138,12 +159,17 @@ export class LocalStore {
 
   concept(id: string): GuideConcept | null {
     if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(id)) return null;
-    const definitions = [
-      ...(this.data.skillRetrofits ?? []).flatMap(review => review.concepts),
-      ...this.data.lessons.flatMap(lesson => lesson.curriculum?.conceptUpdates ?? []),
-    ];
-    const definition = definitions.filter(item => item.id === id).at(-1);
+    const graph = buildKnowledgeGraph(this.data);
+    id = canonicalId(id, graph.aliases);
+    const definition = graph.concepts.find(item => item.id === id);
     return definition ? { id, name: definition.name, description: definition.description } : null;
+  }
+
+  undoConceptMerge(id: string): void {
+    const history = this.data.graphRevisions ?? [];
+    const merge = history.find(item => item.id === id && item.change.type === 'merge');
+    if (!merge || history.some(item => item.change.type === 'undo-merge' && item.change.mergeId === id)) throw new AppError('This merge is missing or already undone.', 409);
+    this.update({ ...this.data, graphRevisions: [...history, { id: randomUUID(), createdAt: new Date().toISOString(), source: 'user', change: { type: 'undo-merge', mergeId: id, reason: 'Learner reversed this concept equivalence.' } }] });
   }
 
   previewConcepts(): GuideConcept[] {
@@ -152,12 +178,22 @@ export class LocalStore {
       || this.data.attempts.some(item => item.lessonId === lesson.id)) return [];
     const frontier = lesson.curriculum?.frontier ?? [];
     const updates = lesson.curriculum?.conceptUpdates ?? [];
-    const ids = frontier.filter(item => item.decision === 'introduce' || (item.decision === 'explore' && updates.some(c => c.id === item.conceptId && c.familiarity === 'unknown')))
-      .map(item => item.conceptId);
+    const memory = buildCurriculumMemory({ ...this.data, settings: { ...this.data.settings, tutorMode: 'reflective' } });
+    const unfamiliar = (id: string, contextId: string) => !memory.concepts.find(item => item.id === id)?.contextPractice?.[contextId]?.exposures;
+    const directions = frontier.filter(item => item.decision === 'introduce' || (item.decision === 'explore' && (lesson.curriculum?.knowledge ? unfamiliar(item.conceptId, item.contextId!) : updates.some(c => c.id === item.conceptId && c.familiarity === 'unknown'))))
+      .map(item => ({ id: item.conceptId, contextId: item.contextId ?? lesson.language ?? 'javascript' }));
     for (const question of lesson.questions) if (question.plan?.purposes.includes('introduction')) {
-      for (const id of question.plan.conceptIds) if (updates.some(concept => concept.id === id && concept.familiarity === 'unknown')) ids.push(id);
+      for (const id of question.plan.conceptIds) if (lesson.curriculum?.knowledge ? unfamiliar(id, question.contextId!) : updates.some(concept => concept.id === id && concept.familiarity === 'unknown')) directions.push({ id, contextId: questionContext(question, lesson) });
     }
-    return [...new Set(ids)].map(id => this.concept(id)).filter((item): item is GuideConcept => Boolean(item));
+    const concepts: GuideConcept[] = [];
+    const seen = new Set<string>();
+    for (const { id, contextId } of directions) {
+      const concept = this.concept(id);
+      if (!concept) continue;
+      const key = `${concept.id}\0${contextId}`;
+      if (!seen.has(key)) { concepts.push({ ...concept, contextId }); seen.add(key); }
+    }
+    return concepts;
   }
 
   startPreparedLesson(id: string): void {
@@ -175,14 +211,17 @@ export class LocalStore {
 
   saveGuide(guide: ConceptGuide): void {
     if (!this.concept(guide.conceptId)) throw new AppError('Concept not found.', 404);
-    this.update({ ...this.data, guides: [...(this.data.guides ?? []).filter(item => item.conceptId !== guide.conceptId || (item.language ?? 'javascript') !== (guide.language ?? 'javascript')), structuredClone(guide)] });
+    this.update({ ...this.data, guides: [...(this.data.guides ?? []).filter(item => item.conceptId !== guide.conceptId || guideContext(item) !== guideContext(guide)), structuredClone(guide)] });
   }
 
-  recordGuideEvent(conceptId: string, action: GuideEvent['action'], language: Language = 'javascript'): void {
-    if (!['javascript', 'python', 'rust'].includes(language)) throw new AppError('Choose a supported guide language.');
-    const guide = this.data.guides?.find(item => item.conceptId === conceptId && (item.language ?? 'javascript') === language);
+  recordGuideEvent(conceptId: string, action: GuideEvent['action'], language: Language = 'javascript', contextId?: string): void {
+    const selectedContext = contextId ?? language;
+    if (!buildKnowledgeGraph(this.data).contexts.some(item => item.id === selectedContext)) throw new AppError('Choose a known learning context.');
+    const graph = buildKnowledgeGraph(this.data);
+    conceptId = canonicalId(conceptId, graph.aliases);
+    const guide = this.data.guides?.find(item => canonicalId(item.conceptId, graph.aliases) === conceptId && guideContext(item) === selectedContext);
     if (!guide || !['opened', 'finished', 'familiar', 'unclear'].includes(action)) throw new AppError('Open a prepared guide before recording an action.');
-    const event: GuideEvent = { id: randomUUID(), conceptId, language, version: guide.version, lessonId: this.activeLesson()?.id ?? null, at: new Date().toISOString(), action };
+    const event: GuideEvent = { id: randomUUID(), conceptId, language: guide.language, contextId: selectedContext, version: guide.version, lessonId: this.activeLesson()?.id ?? null, at: new Date().toISOString(), action };
     this.update({ ...this.data, guideEvents: [...this.data.guideEvents ?? [], event] });
   }
 
@@ -199,7 +238,12 @@ export class LocalStore {
     try { this.persist(); } catch (error) { this.data = previous; throw error; }
   }
 
-  saveSettings(settings: Settings) { this.update({ ...this.data, settings: parseSettings(settings) }); }
+  saveSettings(settings: Settings) {
+    const parsed = parseSettings(settings);
+    // Older clients still send a single language selection.
+    if (settings.language && settings.language !== this.data.settings.language && JSON.stringify(settings.preferredContexts) === JSON.stringify(this.data.settings.preferredContexts)) parsed.preferredContexts = [settings.language];
+    this.update({ ...this.data, settings: parsed });
+  }
 
   activeLesson(): Lesson | undefined {
     return this.data.activeLessonId ? this.data.lessons.find(lesson => lesson.id === this.data.activeLessonId) : this.data.lessons.at(-1);
@@ -219,7 +263,8 @@ export class LocalStore {
     proposal = structuredClone(proposal);
     const lesson: Lesson = {
       id: randomUUID(), createdAt: new Date().toISOString(), provider: settings.provider, model: settings.model,
-      tutorMode: settings.tutorMode, interests: settings.interests, language: settings.language ?? 'javascript',
+      tutorMode: settings.tutorMode, interests: settings.interests, language: proposal.questions.find(question => question.language)?.language ?? settings.language ?? 'javascript',
+      ...(proposal.curriculum?.knowledge ? { contextIds: [...new Set(proposal.questions.map(question => question.contextId!))] } : {}),
       ...(focus ? { focus } : {}),
       objective: proposal.objective, rationale: proposal.rationale, assumptions: proposal.assumptions,
       reflection: proposal.reflection, hypotheses: proposal.hypotheses,
@@ -232,7 +277,10 @@ export class LocalStore {
     // Write the whole sealed plan before any question can be returned to a client.
     writeFileSync(path, JSON.stringify(lesson, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
     chmodSync(path, 0o400);
-    this.update({ ...this.data, lessons: [...this.data.lessons, lesson], activeLessonId: lesson.id });
+    const revisions = [...this.data.graphRevisions ?? []];
+    for (const relationship of proposal.curriculum?.knowledge?.relationships ?? []) revisions.push({ id: randomUUID(), createdAt: lesson.createdAt, source: 'lesson', lessonId: lesson.id, change: { type: 'relationship', relationship } });
+    for (const merge of proposal.curriculum?.knowledge?.merges ?? []) revisions.push({ id: randomUUID(), createdAt: lesson.createdAt, source: 'lesson', lessonId: lesson.id, change: { type: 'merge', ...merge } });
+    this.update({ ...this.data, lessons: [...this.data.lessons, lesson], graphRevisions: revisions, activeLessonId: lesson.id });
     return structuredClone(lesson);
   }
 
@@ -367,7 +415,7 @@ export class LocalStore {
     // Planning metadata may identify a future mirror and reveal its verdict.
     const retro = this.data.skillRetrofits?.flatMap(item => item.questions).find(item => item.exerciseId === question.id && item.lessonId === lesson.id);
     const ids = question.plan?.skillUses?.filter(use => use.role !== 'incidental').map(use => use.conceptId) ?? retro?.uses.filter(use => use.role !== 'incidental').map(use => use.conceptId) ?? question.plan?.conceptIds ?? [];
-    const relatedConcepts = [...new Set(ids)].map(id => this.concept(id)).filter((item): item is GuideConcept => Boolean(item)).slice(0, 4);
+    const relatedConcepts = [...new Set(ids)].map(id => this.concept(id)).filter((item): item is GuideConcept => Boolean(item)).slice(0, 4).map(concept => ({ ...concept, contextId: questionContext(question, lesson) }));
     const afterPlan = (at: string) => Date.parse(at) >= Date.parse(lesson.createdAt) && Date.parse(at) <= Date.parse(attempt.answeredAt);
     const opened = (this.data.guideEvents ?? []).filter(event => event.action === 'opened' && event.lessonId === lesson.id && afterPlan(event.at));
     const practiced = this.data.lessons.filter(item => item.focus?.parentLessonId === lesson.id && this.data.attempts.some(answer => answer.lessonId === item.id && afterPlan(answer.answeredAt)));
@@ -378,7 +426,7 @@ export class LocalStore {
     const revision = this.data.presentationRevisions?.flatMap(item => item.questions).find(item => item.exerciseId === question.id);
     const displayed = revision ? revisedQuestion(question, revision) : question;
     const { plan: _plan, ...answeredQuestion } = displayed;
-    return structuredClone({ attempt, question: complete ? displayed : answeredQuestion, lessonObjective: lesson.objective, provider: lesson.provider, language: lesson.language ?? 'javascript',
+    return structuredClone({ attempt, question: complete ? displayed : answeredQuestion, lessonObjective: lesson.objective, provider: lesson.provider, language: questionLanguage(question, lesson), contextId: questionContext(question, lesson), contextName: buildKnowledgeGraph(this.data).contexts.find(item => item.id === questionContext(question, lesson))?.name,
       relatedConcepts, teachingBeforeAnswer,
       ...(revision ? { originalPresentation: { specification: question.specification, code: question.code, referenceCode: question.referenceCode } } : {}),
     });
@@ -387,7 +435,7 @@ export class LocalStore {
   context(): TutorContext {
     const history = this.data.lessons.map(lesson => ({ lesson, attempts: this.data.attempts.filter(item => item.lessonId === lesson.id && !item.flagged) }));
     if (this.data.settings.tutorMode === 'baseline') {
-      return { settings: { ...this.data.settings }, history: [], hypotheses: [], reviewSessions: [], feedback: [], discussions: [], curriculum: { concepts: [], variants: [], legacyLessons: [] }, metrics: calculateMetrics({ ...this.data, lessons: [], attempts: [] }) };
+      return { settings: { ...this.data.settings }, knowledge: { concepts: [], contexts: structuredClone(BASE_CONTEXTS), relationships: [], aliases: {}, history: [] }, history: [], hypotheses: [], reviewSessions: [], feedback: [], discussions: [], curriculum: { concepts: [], variants: [], legacyLessons: [] }, metrics: calculateMetrics({ ...this.data, lessons: [], attempts: [] }) };
     }
     const hypotheses = this.data.lessons.at(-1)?.hypotheses ?? [];
     const evidence = new Set(hypotheses.flatMap(item => [...item.supportingAttemptIds, ...item.counterevidenceAttemptIds]));
@@ -399,7 +447,7 @@ export class LocalStore {
     const knownLessons = new Set(selected.map(item => item.lesson.id));
     const discussions = (this.data.discussions ?? []).filter(item => knownLessons.has(item.lessonId)).slice(-12);
     while (discussions.length > 1 && Buffer.byteLength(JSON.stringify(discussions)) > 48_000) discussions.shift();
-    return { settings: { ...this.data.settings }, history: structuredClone(selected),
+    return { settings: { ...this.data.settings }, knowledge: buildKnowledgeGraph(this.data), history: structuredClone(selected),
       curriculum: buildCurriculumMemory(this.data),
       // Older review details remain in durable concept evidence, just as old plans do.
       skillRetrofits: structuredClone((this.data.skillRetrofits ?? []).map(review => ({ ...review,
@@ -430,7 +478,7 @@ export class LocalStore {
       const answered = this.data.attempts.filter(item => item.lessonId === lesson.id).length;
       const complete = answered === lesson.questions.length;
       return { id: lesson.id, objective: lesson.objective, rationale: complete ? lesson.rationale : 'The tutor’s rationale is sealed until this lesson is complete, so it cannot give away the answers.', createdAt: lesson.createdAt,
-        provider: lesson.provider, tutorMode: lesson.tutorMode, language: lesson.language ?? 'javascript', answered, total: lesson.questions.length, complete,
+        provider: lesson.provider, tutorMode: lesson.tutorMode, language: lesson.language ?? 'javascript', contextIds: lesson.contextIds ?? [lesson.language ?? 'javascript'], answered, total: lesson.questions.length, complete,
         reflection: complete ? lesson.reflection : null, assumptions: complete ? lesson.assumptions : [],
         hypotheses: complete ? lesson.hypotheses : [], predictionHash: lesson.predictionHash,
         ...(complete && lesson.curriculum ? { curriculum: lesson.curriculum } : {}),
@@ -438,10 +486,23 @@ export class LocalStore {
         ...((this.data.endedFocusIds ?? []).includes(lesson.id) ? { endedEarly: true } : {}) };
     });
     const current = this.pendingQuestion();
+    const graph = buildKnowledgeGraph(this.data);
+    const completedIds = new Set(summaries.filter(item => item.complete).map(item => item.id));
+    const publicData = { ...this.data, settings: { ...this.data.settings, tutorMode: 'reflective' as const }, lessons: this.data.lessons.map(lesson => {
+      if (completedIds.has(lesson.id)) return lesson;
+      const questions = lesson.questions.filter(question => this.data.attempts.some(attempt => attempt.lessonId === lesson.id && attempt.exerciseId === question.id));
+      const visibleIds = new Set(questions.flatMap(question => question.plan?.skillUses?.map(use => use.conceptId) ?? question.plan?.conceptIds ?? []));
+      return { ...lesson, questions, ...(lesson.curriculum ? { curriculum: { ...lesson.curriculum,
+        conceptUpdates: lesson.curriculum.conceptUpdates.filter(item => visibleIds.has(item.id)).map(item => ({ ...item, prerequisiteIds: [], familiarity: 'unknown' as const, evidenceAttemptIds: [], uncertainty: 'The current assessment remains sealed.', nextProbe: 'The next probe remains sealed.' })),
+        ...(lesson.curriculum.knowledge ? { knowledge: { ...lesson.curriculum.knowledge, concepts: lesson.curriculum.knowledge.concepts.filter(item => visibleIds.has(item.id)), relationships: [], assessments: [], merges: [] } } : {}),
+        observations: [], frontier: [], mixRationale: '', sequenceRationale: '',
+      } } : {}) };
+    }), graphRevisions: this.data.graphRevisions?.filter(item => item.change.type !== 'relationship' || !item.lessonId || completedIds.has(item.lessonId)) };
     return structuredClone({ settings: this.data.settings, providers, job, ...(languages ? { languages } : {}),
+      contexts: graph.contexts, environments: executionEnvironments(languages), knowledge: buildKnowledgeGraph(publicData), conceptMemory: buildCurriculumMemory(publicData).concepts,
       currentLesson: summaries.find(item => item.id === this.activeLesson()?.id) ?? null,
-      lessonPreview: this.previewConcepts(), guides: this.data.guides ?? [],
-      question: current ? { id: current.id, title: current.title, specification: current.specification, code: current.code, language: this.activeLesson()?.language ?? 'javascript',
+      lessonPreview: this.previewConcepts(), guides: (this.data.guides ?? []).map(item => ({ ...item, conceptId: canonicalId(item.conceptId, graph.aliases) })),
+      question: current ? { id: current.id, title: current.title, specification: current.specification, code: current.code, language: questionLanguage(current, this.activeLesson()), ...(current.contextId ? { kind: current.kind, contextId: current.contextId, contextName: graph.contexts.find(item => item.id === current.contextId)?.name, ...(current.kind === 'answer-review' ? { proposedAnswer: current.proposedAnswer } : {}) } : {}),
         purpose: current.purpose, testCount: current.validation.testCount } : null,
       lessons: [...summaries].reverse(), reviews: [...this.data.attempts].reverse().map(item => this.review(item)),
       hypotheses: summaries.filter(item => item.complete).at(-1)?.hypotheses ?? [],

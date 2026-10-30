@@ -1,6 +1,7 @@
 import type { ProposedLesson, TutorContext } from '../src/types.ts';
 import { LESSON_SIZES } from '../src/lesson-sizes.ts';
 import { PURPOSES } from '../src/types.ts';
+import { buildKnowledgeTutorPrompt } from './knowledge-prompts.ts';
 
 type Schema = {
   type?: string | string[];
@@ -71,17 +72,44 @@ export const lessonOutputSchema = object({
   }), Math.max(...LESSON_SIZES), 1),
 });
 
-export function lessonSchemaForBatch(batchSize: number): Schema {
+export const contextualQuestionPlanSchema = { ...questionPlanSchema, properties: { ...questionPlanSchema.properties,
+  skillUses: list(object({ ...questionPlanSchema.properties!.skillUses.items!.properties!, contextId: id() }), 12, 1),
+} };
+export const knowledgeSchema = object({
+  concepts: list(object({ id: id(), name: text(140), description: text(600), aliases: list(text(140), 8), domainTags: list(text(80), 6), scope: choice(['general', 'context-specific']), contextIds: list(id(), 6), representations: list(text(140), 6, 1) }), 16),
+  contexts: list(object({ id: id(), name: text(140), description: text(600), parentIds: list(id(), 4), language: { type: ['string', 'null'], enum: ['javascript', 'python', 'rust', null] } }), 6),
+  relationships: list(object({ id: id(), kind: choice(['prerequisite', 'specialization', 'related', 'application']), fromId: id(), toId: id(), contextIds: list(id(), 6), rationale: text(700), active: { type: 'boolean' } }), 24),
+  assessments: list(object({ conceptId: id(), contextId: id(), familiarity: choice(['unknown', 'introduced', 'developing', 'familiar']), evidenceAttemptIds: list(text(120), 12), uncertainty: text(700), nextProbe: text(700) }), 16),
+  merges: list(object({ fromId: id(), toId: id(), reason: text(700) }), 4),
+});
+export const contextualCurriculumSchema = object({ ...curriculumSchema.properties!, conceptUpdates: list(curriculumSchema.properties!.conceptUpdates.items!, 0), knowledge: knowledgeSchema,
+  frontier: list(object({ conceptId: id(), contextId: id(), purpose: choice(PURPOSES), readiness: text(700), verification: choice(['executed', 'unverified']), reason: text(700), decision: choice(['introduce', 'defer', 'explore']) }), 6, 1),
+});
+export const contextualLessonOutputSchema = object({ ...lessonOutputSchema.properties!, curriculum: contextualCurriculumSchema,
+  questions: list(object({ ...lessonOutputSchema.properties!.questions.items!.properties!,
+    kind: choice(['code-review', 'answer-review']), contextId: id(), language: { type: ['string', 'null'], enum: ['javascript', 'python', 'rust', null] },
+    signature: { type: ['object', 'null'], properties: { name: text(80), parameters: list(text(80), 6, 1) }, required: ['name', 'parameters'], additionalProperties: false },
+    code: { type: 'string', maxLength: 6000 }, referenceCode: { type: 'string', maxLength: 6000 },
+    proposedAnswer: { type: 'string', maxLength: 6000 }, referenceAnswer: { type: 'string', maxLength: 6000 },
+    verification: object({ mode: choice(['execute', 'unverified']), environmentId: { type: ['string', 'null'], enum: ['javascript', 'python', 'rust', null] }, reason: text(700) }),
+    plan: contextualQuestionPlanSchema,
+    tests: list(lessonOutputSchema.properties!.questions.items!.properties!.tests.items!, 12),
+  }), Math.max(...LESSON_SIZES), 1),
+});
+
+export function lessonSchemaForBatch(batchSize: number, contextual = false): Schema {
+  const schema = contextual ? contextualLessonOutputSchema : lessonOutputSchema;
   return {
-    ...lessonOutputSchema,
+    ...schema,
     properties: {
-      ...lessonOutputSchema.properties,
-      questions: { ...lessonOutputSchema.properties!.questions, minItems: batchSize, maxItems: batchSize },
+      ...schema.properties,
+      questions: { ...schema.properties!.questions, minItems: batchSize, maxItems: batchSize },
     },
   };
 }
 
 export function buildTutorPrompt(context: TutorContext, now = new Date()): string {
+  if (context.knowledge) return buildKnowledgeTutorPrompt(context, lessonSchemaForBatch(context.settings.batchSize, true), now);
   const baseline = context.settings.tutorMode === 'baseline';
   const python = context.settings.language === 'python';
   const rust = context.settings.language === 'rust';
@@ -116,12 +144,12 @@ ${context.focus ? `This is a short optional focused practice lesson on ${context
 Produce exactly ${context.settings.batchSize} short ${rust ? 'Rust' : python ? 'Python' : 'JavaScript'} questions. Learner judges each implementation as "correct" or "buggy" against its precise specification, or chooses "idk" to record uncertainty without a correctness grade.
 Write the specification as a concise, natural task: lead with what the function does, then behavior and relevant edge cases needed to judge it. Usually 1–3 short sentences. Prefer conventional programming language: "index" rather than "zero-based position", "below the threshold" rather than "strictly below threshold" when ordinary wording is unambiguous. Be precise about genuinely ambiguous behavior (inclusive bounds, null versus zero, ties, empty results), without mathematical or bureaucratic phrasing. Give each title a natural task name.
 Prefer describing the desired behavior over spelling out a recipe, formula, or implication the learner can work out. For example, if a task asks for signed decreases between neighboring readings, avoid redundantly explaining that increases produce negative values or repeating the subtraction in its docstring when the intended meaning is already clear. Keep a concise sign or ordering convention when needed to make the contract unambiguous, as well as important edge cases. Apply the same judgment to comments and documentation; put optional reasoning in the answer explanation. This is a preference, not a reason to omit necessary information or reject an otherwise sound question.
-${rust ? `Write idiomatic, beginner-friendly Rust functions. Use descriptive snake_case function and parameter names and a short conventional /// documentation comment immediately before each function. Include domain constraints when needed, not test-harness limits. Candidate and reference must have identical documentation, parameter names, parameter types, and explicit return type, matching signature.name and signature.parameters. No generic function parameters, lifetime annotations, structs, classes, custom macros, attributes, unsafe code, I/O, environment, network, filesystem, threads, async, or third-party dependencies. Only use the Rust standard library; imports such as use std::collections::HashMap are fine. The reference must compile, terminate, and produce observable JSON-compatible outputs on all fixtures. A buggy candidate may either compile and give a wrong result, or have a focused Rust ownership, borrowing, or type error that makes the function itself fail to compile. Only use clear standard Rust diagnostics such as E0382, E0502, E0499, E0505, E0506, E0507, E0515, E0596, E0597, E0716, E0308, E0277, or E0599. Explain the actual compiler issue; do not use missing libraries or sandbox limitations as bugs. Do not make every question a compile failure. Timeouts, harness failures, and unsupported output do not establish a bug.
+${rust ? `Write idiomatic, beginner-friendly Rust functions. Use descriptive snake_case function and parameter names and a short conventional /// documentation comment immediately before each function. Include domain constraints when needed, not test-harness limits. Candidate and reference must have identical documentation, parameter names, parameter types, and explicit return type, matching signature.name and signature.parameters. No generic function parameters, lifetime annotations, structs, classes, custom macros, attributes, unsafe code, I/O, environment, network, filesystem, threads, async, or third-party dependencies. Only use the Rust standard library; imports such as use std::collections::HashMap are fine. The reference must compile, terminate, and produce observable JSON-compatible outputs on all fixtures. Both candidate and reference must compile. A buggy candidate must have a behavioral counterexample or runtime failure; never use compiler-only ownership, borrowing, or type errors as an exercise. Timeouts, harness failures, and unsupported output do not establish a bug.
 Supported fixture parameter types are bool, char, String, &str, integer primitives (i8/i16/i32/i64/isize/u8/u16/u32/u64/usize), f32/f64, Vec<T>, &[T], &T, Option<T>, Result<T,E>, and HashMap<String,T>, with supported nested owned types T. Returns can be these primitives, strings, vectors, slices, options, results, or HashMap<String,T>. Do not use nested Option<Option<T>> because the fixture representation cannot distinguish its states. Use the simplest natural types; &str and &[i64] are good for borrowed inputs. If returning a borrowed value, use one reference parameter so Rust's lifetime elision applies; otherwise return an owned value. Do not require mutation through &mut. For example:
 /// Return the first index whose reading is below the threshold.
 fn first_low(readings: &[i64], threshold: i64) -> Option<usize> { ... }
 The matching specification is: "Return the index of the first reading below the threshold, or None if there is none." Do not reveal the implementation or any fixture or sandbox limitation in the question.
-Each question needs 4–12 distinct JSON fixtures with ordinary cases and boundaries. inputJson is an array of positional arguments even for one parameter: for first_low, "[[4,1,3],2]"; expectedJson is "1". JSON null represents None, and a value represents Some(value); encode Result as {"Ok":value} or {"Err":value}. A JSON array represents a Rust Vec or slice. A JSON object represents HashMap<String,T>. Use small numbers and finite JSON values, with fixture integers inside the safe JSON integer range. This limit applies to test serialization, not the Rust task description. referenceCode must pass every fixture. A correct candidate must compile and pass every fixture; a buggy candidate must fail at least one fixture or independently fail compilation with one of the supported diagnostics. Supply an explanation of the actual defect, and ensure no shared fixture contradicts the written contract.
+Each question needs 4–12 distinct JSON fixtures with ordinary cases and boundaries. inputJson is an array of positional arguments even for one parameter: for first_low, "[[4,1,3],2]"; expectedJson is "1". JSON null represents None, and a value represents Some(value); encode Result as {"Ok":value} or {"Err":value}. A JSON array represents a Rust Vec or slice. A JSON object represents HashMap<String,T>. Use small numbers and finite JSON values, with fixture integers inside the safe JSON integer range. This limit applies to test serialization, not the Rust task description. referenceCode must pass every fixture. A correct candidate must compile and pass every fixture; a buggy candidate must compile and fail at least one fixture. Supply an explanation of the actual defect, and ensure no shared fixture contradicts the written contract.
 ` : python ? `Put input types and meaningful domain constraints in a conventional multiline Python docstring inside each function, not in the problem description. Include relationships between parameters when necessary to understand the contract. Keep requested behavior and genuinely necessary task-specific rules in the description. Avoid unnecessary wrapper objects and arbitrary bounds added only for testing. Never mention JavaScript, JSON safe-integer limits, or sandbox constraints in the learner-facing Python specification or docstring: they are limits of our test fixtures, not Python language rules. Put reusable programming explanations in optional concept guides rather than question text.
 Use descriptive snake_case function and parameter names. Never use solve, main, solution, input, data, or args as generic names. Use natural positional parameters, e.g. last_low_stock_index(counts, threshold); use a dictionary only when it naturally represents a domain object. Set signature.name and signature.parameters to the exact declarations in both candidate and reference. Use synchronous def functions, no decorators, positional defaults, variadic or keyword-only arguments. Type hints are welcome when they improve readability.
 Put an identical neutral multiline docstring as the first statement inside BOTH functions. Describe every parameter and its constraints, the return value, and never reveal the verdict. Example:
@@ -226,18 +254,18 @@ export function validateSchema(value: unknown, schema: Schema, path: string): vo
   }
 }
 
-export function parseLessonOutput(raw: string): ProposedLesson {
+export function parseLessonOutput(raw: string, requireContextual = false): ProposedLesson {
   let value: unknown;
   try { value = JSON.parse(raw.trim().replace(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i, '$1')); }
   catch { throw new Error('Tutor returned malformed JSON. Retry generation or select another model.'); }
-  try { validateSchema(value, lessonOutputSchema, 'lesson'); }
+  try { validateSchema(value, requireContextual || (value as ProposedLesson)?.curriculum?.knowledge ? contextualLessonOutputSchema : lessonOutputSchema, 'lesson'); }
   catch (error) { throw new Error(`Tutor returned an invalid lesson: ${(error as Error).message} Retry generation.`); }
   type WireLesson = Omit<ProposedLesson, 'questions'> & { questions: (Omit<ProposedLesson['questions'][number], 'tests'> & { tests: { inputJson: string; expectedJson: string; note: string }[] })[] };
   const wire = value as WireLesson;
   return {
     ...wire,
     questions: wire.questions.map(question => ({
-      ...question,
+      ...Object.fromEntries(Object.entries(question).filter(([key, value]) => !(['signature', 'language'].includes(key) && value === null))) as typeof question,
       tests: question.tests.map(({ inputJson, expectedJson, note }) => {
         try {
           const input = JSON.parse(inputJson);

@@ -91,7 +91,10 @@ test('given more than twelve archived lessons, when rebuilding after restart, th
   const restarted = new LocalStore(directory);
   assert.equal(restarted.context().history.length, 12);
   assert.ok(restarted.context().history.every(item => item.lesson.id !== lessons[0].id));
-  assert.deepEqual(buildCurriculumMemory(restarted.snapshot()), expected);
+  const migrated = buildCurriculumMemory(restarted.snapshot());
+  assert.equal(migrated.concepts.find(item => item.id === 'bounds')?.exposures, bounds.exposures);
+  assert.equal(migrated.concepts.find(item => item.id === 'bounds')?.contextPractice?.javascript.familiarity, 'familiar');
+  assert.deepEqual(migrated.variants, expected.variants);
   assert.equal(restarted.snapshot().lessons[0].predictionHash, lessonHash(lessons[0]));
 });
 

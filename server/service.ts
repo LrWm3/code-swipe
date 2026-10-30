@@ -6,9 +6,12 @@ import { createDemoLesson } from './demo.ts';
 import { createPythonDemoLesson } from './python-demo.ts';
 import { createRustDemoLesson } from './rust-demo.ts';
 import { validateLesson } from './validation.ts';
-import { reviewedGuide } from './concept-guides.ts';
+import { parseGuide, reviewedGuide } from './concept-guides.ts';
 import { pythonAvailability } from './python-runtime.ts';
 import { rustAvailability } from './rust-runtime.ts';
+import { buildKnowledgeGraph } from './knowledge-graph.ts';
+import { executionEnvironments } from './environments.ts';
+import { BASE_CONTEXTS, guideContext, isLanguage } from '../src/learning-contexts.ts';
 
 export class TutorService {
   job: Job | null = null;
@@ -30,7 +33,7 @@ export class TutorService {
   requireIdle() {
     if (this.job?.status === 'running') throw new AppError('Cancel the current tutor run before changing settings or evidence.', 409);
   }
-  plan(focusRequest?: { conceptId: string; length: number; language?: Language }) {
+  plan(focusRequest?: { conceptId: string; length: number; language?: Language; contextId?: string }) {
     this.requireIdle();
     const parent = this.store.activeLesson();
     const concept = focusRequest ? this.store.concept(focusRequest.conceptId) : null;
@@ -43,17 +46,21 @@ export class TutorService {
     }
     if (!focusRequest) this.store.skipUnansweredDiscussions();
     context = this.store.context();
+    context.environments = executionEnvironments(this.languages);
     if (focusRequest && concept && parent) {
-      context.settings = { ...context.settings, batchSize: focusRequest.length, language: focusRequest.language ?? parent.language ?? 'javascript' };
+      const contextId = focusRequest.contextId ?? focusRequest.language ?? parent.contextIds?.[0] ?? parent.language ?? 'javascript';
+      const definition = buildKnowledgeGraph(this.store.snapshot()).contexts.find(item => item.id === contextId);
+      if (!definition) throw new AppError('Choose a known learning context.');
+      context.settings = { ...context.settings, batchSize: focusRequest.length, language: definition.language ?? focusRequest.language ?? parent.language ?? 'javascript', preferredContexts: [contextId] };
       const answered = new Set(this.store.snapshot().attempts.filter(item => item.lessonId === parent.id).map(item => item.exerciseId));
-      context.focus = { concept, parentLessonId: parent.id, avoidQuestions: parent.questions.filter(item => !answered.has(item.id)) };
+      context.focus = { concept: { ...concept, contextId }, contextId, parentLessonId: parent.id, avoidQuestions: parent.questions.filter(item => !answered.has(item.id)) };
     }
     const language = context.settings.language ?? 'javascript';
     const runtime = this.languages.find(item => item.id === language);
-    if (!runtime?.available) throw new AppError(runtime?.detail ?? `The ${language} sandbox is unavailable.`, 503);
+    if (context.settings.provider === 'demo' && !runtime?.available) throw new AppError(runtime?.detail ?? `The ${language} sandbox is unavailable.`, 503);
     this.controller = new AbortController();
     const controller = this.controller;
-    const job: Job = { id: randomUUID(), kind: focusRequest ? 'focus' : 'lesson', ...(concept ? { conceptId: concept.id, language } : {}), status: 'running', stage: 'planning', startedAt: new Date().toISOString(), message: 'Preparing the lesson…' };
+    const job: Job = { id: randomUUID(), kind: focusRequest ? 'focus' : 'lesson', ...(concept ? { conceptId: concept.id, language, contextId: context.focus?.contextId ?? language } : {}), status: 'running', stage: 'planning', startedAt: new Date().toISOString(), message: 'Preparing the lesson…' };
     this.job = job;
     this.store.recordJob(job);
     const active = () => !controller.signal.aborted && this.job?.id === job.id && job.status === 'running';
@@ -70,7 +77,7 @@ export class TutorService {
           const repairMessage = `A check failed. Asking the tutor to repair the lesson (${attempt} of ${maxRepairs})…`;
           const proposal = context.settings.provider === 'demo' ? (context.settings.language === 'rust' ? createRustDemoLesson(context) : context.settings.language === 'python' ? createPythonDemoLesson(context) : createDemoLesson(context)) : await this.generate(context, { signal: controller.signal, onProgress: message => progress(attempt ? repairMessage : message, attempt ? 'repairing' : 'planning') });
           if (!active()) return;
-          progress(`Running every fixture in the isolated ${language === 'python' ? 'Python' : language === 'rust' ? 'Rust' : 'JavaScript'} sandbox…`, 'validating');
+          progress('Checking the lesson and running supported exercises in their isolated environments…', 'validating');
           let validated: Awaited<ReturnType<typeof validateLesson>>;
           try { validated = await validateLesson(proposal, context, controller.signal); }
           catch (error) {
@@ -84,8 +91,8 @@ export class TutorService {
             continue;
           }
           if (!active()) return;
-          this.store.commitLesson(validated, context.settings, context.focus ? { conceptId: context.focus.concept.id, parentLessonId: context.focus.parentLessonId } : undefined);
-          Object.assign(job, { status: 'ready', stage: 'ready', message: 'Lesson checked. Predictions committed. Ready to play.' });
+          this.store.commitLesson(validated, context.settings, context.focus ? { conceptId: context.focus.concept.id, contextId: context.focus.contextId, parentLessonId: context.focus.parentLessonId } : undefined);
+          Object.assign(job, { status: 'ready', stage: 'ready', message: 'Lesson prepared. Predictions committed. Ready to play.' });
           this.store.recordJob(job);
           return;
         }
@@ -96,31 +103,35 @@ export class TutorService {
       }
     })();
   }
-  prepareGuide(conceptId: string, language: Language = 'javascript') {
+  prepareGuide(conceptId: string, language: Language = 'javascript', contextId?: string) {
     this.requireIdle();
-    if (!['javascript', 'python', 'rust'].includes(language)) throw new AppError('Choose a supported guide language.');
+    const selectedContext = contextId ?? language;
+    const definition = buildKnowledgeGraph(this.store.snapshot()).contexts.find(item => item.id === selectedContext);
+    if (!definition) throw new AppError('Choose a known learning context.');
+    language = definition.language ?? (isLanguage(selectedContext) ? selectedContext : 'javascript');
     const concept = this.store.concept(conceptId);
     if (!concept) throw new AppError('Concept not found.', 404);
-    if (this.store.snapshot().guides?.some(item => item.conceptId === conceptId && (item.language ?? 'javascript') === language)) return;
-    const curated = reviewedGuide(concept, language);
-    if (curated) { this.store.saveGuide(curated); return; }
+    conceptId = concept.id;
+    if (this.state().guides?.some(item => item.conceptId === conceptId && guideContext(item) === selectedContext)) return;
+    const curated = BASE_CONTEXTS.slice(0, 3).some(item => item.id === selectedContext) ? reviewedGuide(concept, language) : null;
     const settings = { ...this.store.snapshot().settings, language };
     const runtime = this.languages.find(item => item.id === language);
-    if (!runtime?.available) throw new AppError(runtime?.detail ?? 'This language sandbox is unavailable.', 503);
-    if (!this.providers.some(item => item.id === settings.provider && item.available) || settings.provider === 'demo') {
+    if (isLanguage(selectedContext) && !runtime?.available) throw new AppError(runtime?.detail ?? 'This language sandbox is unavailable.', 503);
+    if (!curated && (!this.providers.some(item => item.id === settings.provider && item.available) || settings.provider === 'demo')) {
       throw new AppError('Choose an available Codex or OpenCode tutor in Setup to prepare this guide.', 503);
     }
     this.controller = new AbortController();
     const controller = this.controller;
-    const job: Job = { id: randomUUID(), kind: 'guide', conceptId, language, status: 'running', stage: 'preparing', startedAt: new Date().toISOString(), message: 'Preparing your concept guide…' };
+    const job: Job = { id: randomUUID(), kind: 'guide', conceptId, language, contextId: selectedContext, status: 'running', stage: 'preparing', startedAt: new Date().toISOString(), message: 'Preparing your concept guide…' };
     this.job = job;
     this.store.recordJob(job);
     const active = () => !controller.signal.aborted && this.job?.id === job.id && job.status === 'running';
     this.work = (async () => {
       try {
-        const guide = await generateGuide(settings, concept, { signal: controller.signal, onProgress: message => {
+        const guide = curated ? { ...await parseGuide(JSON.stringify({ title: curated.title, description: curated.description, takeaway: curated.takeaway,
+          examples: curated.examples.map(example => ({ mode: example.mode ?? 'expression', expression: example.expression, expectedJson: JSON.stringify(example.result), explanation: example.explanation })) }), concept, controller.signal, language), contextId: selectedContext, version: curated.version } : await generateGuide(settings, concept, { signal: controller.signal, onProgress: message => {
           if (active()) { job.message = message; this.store.recordJob(job); }
-        } });
+        } }, definition);
         if (!active()) return;
         this.store.saveGuide(guide);
         Object.assign(job, { status: 'ready', stage: 'ready', message: 'Concept guide ready.' });

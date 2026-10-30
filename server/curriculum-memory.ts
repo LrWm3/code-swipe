@@ -1,5 +1,6 @@
 import type { Attempt, ConceptRecord, ConceptUpdate, CurriculumMemory, Exercise, Lesson, StoreData, VariantRecord, SkillEvidence } from '../src/types.ts';
 import { questionSkills, interpretSkill, independentSupport, familiaritySupport } from './skill-evidence.ts';
+import { contextualizeMemory } from './context-memory.ts';
 
 interface LinkedAttempt {
   attempt: Attempt;
@@ -212,10 +213,11 @@ export function buildCurriculumMemory(data: StoreData): CurriculumMemory {
     record.evidence = summarizeEvidence(evidence, cited, record.familiarity === 'familiar', record.id);
   }
 
-  return {
+  const memory: CurriculumMemory = {
     concepts: [...concepts.values()], variants: [...variants.values()],
     legacyLessons: data.lessons.filter(lesson => !lesson.curriculum).map(lesson => ({
       lessonId: lesson.id, objective: lesson.objective, answered: answeredByLesson.get(lesson.id) ?? 0,
     })),
   };
+  return data.version === 2 || data.lessons.some(lesson => lesson.curriculum?.knowledge) ? contextualizeMemory(data, memory) : memory;
 }

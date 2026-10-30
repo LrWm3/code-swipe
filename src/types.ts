@@ -1,11 +1,82 @@
 export type ProviderId = 'codex' | 'opencode' | 'demo';
 export type Language = 'javascript' | 'python' | 'rust';
+export type Familiarity = 'unknown' | 'introduced' | 'developing' | 'familiar';
+export interface KnowledgeConcept {
+  id: string;
+  name: string;
+  description: string;
+  aliases: string[];
+  domainTags: string[];
+  scope: 'general' | 'context-specific';
+  contextIds: string[];
+  representations: string[];
+}
+export interface LearningContext {
+  id: string;
+  name: string;
+  description: string;
+  parentIds: string[];
+  language: Language | null;
+}
+export interface KnowledgeRelationship {
+  id: string;
+  kind: 'prerequisite' | 'specialization' | 'related' | 'application';
+  fromId: string;
+  toId: string;
+  contextIds: string[];
+  rationale: string;
+  active: boolean;
+}
+export interface ContextAssessment {
+  conceptId: string;
+  contextId: string;
+  familiarity: Familiarity;
+  evidenceAttemptIds: string[];
+  uncertainty: string;
+  nextProbe: string;
+}
+export interface ExecutionEnvironment {
+  id: Language;
+  name: string;
+  version: string;
+  contextIds: string[];
+  capabilities: string[];
+  restrictions: string[];
+  available: boolean;
+  detail: string;
+}
+export interface KnowledgePlan {
+  concepts: KnowledgeConcept[];
+  contexts: LearningContext[];
+  relationships: KnowledgeRelationship[];
+  assessments: ContextAssessment[];
+  merges: { fromId: string; toId: string; reason: string }[];
+}
+export interface GraphRevision {
+  id: string;
+  createdAt: string;
+  source: 'lesson' | 'user' | 'migration';
+  lessonId?: string;
+  change: { type: 'merge'; fromId: string; toId: string; reason: string }
+    | { type: 'undo-merge'; mergeId: string; reason: string }
+    | { type: 'relationship'; relationship: KnowledgeRelationship };
+}
+export interface KnowledgeGraph {
+  concepts: KnowledgeConcept[];
+  contexts: LearningContext[];
+  relationships: KnowledgeRelationship[];
+  aliases: Record<string, string>;
+  history: GraphRevision[];
+}
+export type Verification = { status: 'executed'; environmentId: Language; version: string }
+  | { status: 'unverified'; reason: string };
 export type Verdict = 'buggy' | 'correct';
 export type Answer = Verdict | 'idk';
 export const PURPOSES = ['diagnostic', 'practice', 'transfer', 'retention', 'introduction', 'frontier', 'robustness', 'calibration', 'strategy-evaluation'] as const;
 export type Purpose = typeof PURPOSES[number];
 export interface SkillUse {
   conceptId: string;
+  contextId?: string;
   role: 'target' | 'exercised' | 'incidental';
   support: 'independent' | 'scaffolded';
   ifCorrect: 'supports' | 'inconclusive';
@@ -21,6 +92,8 @@ export interface SkillRetrofit {
   questions: { lessonId: string; exerciseId: string; predictionHash: string; uses: SkillUse[]; note: string }[];
 }
 export interface SkillEvidence {
+  contextId?: string;
+  verification?: Verification['status'];
   role: SkillUse['role'];
   support: SkillUse['support'];
   source: 'planned' | 'retrospective' | 'legacy';
@@ -63,13 +136,17 @@ export interface LearningObservation {
   nextAction: string;
 }
 export interface CurriculumPlan {
+  knowledge?: KnowledgePlan;
   conceptUpdates: ConceptUpdate[];
   observations: LearningObservation[];
-  frontier: { conceptId: string; reason: string; decision: 'introduce' | 'defer' | 'explore' }[];
+  frontier: { conceptId: string; contextId?: string; purpose?: Purpose; readiness?: string; verification?: 'executed' | 'unverified'; reason: string; decision: 'introduce' | 'defer' | 'explore' }[];
   mixRationale: string;
   sequenceRationale: string;
 }
 export interface ConceptRecord extends ConceptUpdate {
+  definition?: KnowledgeConcept;
+  contextPractice?: Record<string, ContextPractice>;
+  summary?: string;
   exposures: number;
   correctJudgments: number;
   incorrectJudgments: number;
@@ -82,6 +159,21 @@ export interface ConceptRecord extends ConceptUpdate {
   };
   languagePractice?: Partial<Record<Language, { exposures: number; supporting: number; challenging: number }>>;
   evidence: ({ attemptId: string; lessonId: string; title: string; answer: Answer; correct: boolean | null; answeredAt: string; language?: Language } & Partial<SkillEvidence>)[];
+}
+export interface ContextPractice extends ContextAssessment {
+  exposures: number;
+  supporting: number;
+  challenging: number;
+  inconclusive: number;
+  targeted: number;
+  exercised: number;
+  incidental: number;
+  uncertainJudgments: number;
+  lastSeenAt: string | null;
+  lastTargetedAt: string | null;
+  lastExercisedAt: string | null;
+  lastIndependentSuccessAt: string | null;
+  evidence: ConceptRecord['evidence'];
 }
 export interface VariantRecord {
   familyId: string;
@@ -104,6 +196,8 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 export interface Settings {
   // Missing only in notebooks created before language selection.
   language?: Language;
+  preferredContexts?: string[];
+  excludedContexts?: string[];
   provider: ProviderId;
   model: string;
   interests: string;
@@ -122,6 +216,12 @@ export interface Hypothesis {
 export interface TestCase { input: JsonValue; expected: JsonValue; note: string }
 export interface FunctionSignature { name: string; parameters: string[] }
 export interface ProposedQuestion {
+  kind?: 'code-review' | 'answer-review';
+  contextId?: string;
+  language?: Language;
+  verification?: { mode: 'execute' | 'unverified'; environmentId: Language | null; reason: string };
+  proposedAnswer?: string;
+  referenceAnswer?: string;
   // New questions use positional argument tuples in tests[].input.
   // Sealed legacy questions omit this and still call solve(input).
   signature?: FunctionSignature;
@@ -150,6 +250,7 @@ export interface ProposedLesson {
   curriculum?: CurriculumPlan;
 }
 export interface ValidationReport {
+  verification?: Verification;
   checkedAt: string;
   testCount: number;
   passedCount: number;
@@ -158,6 +259,7 @@ export interface ValidationReport {
 }
 export interface Exercise extends ProposedQuestion { id: string; validation: ValidationReport }
 export interface Lesson extends Omit<ProposedLesson, 'questions'> {
+  contextIds?: string[];
   // Missing means JavaScript for sealed lessons created before language selection.
   language?: Language;
   id: string;
@@ -168,21 +270,24 @@ export interface Lesson extends Omit<ProposedLesson, 'questions'> {
   interests: string;
   questions: Exercise[];
   predictionHash: string;
-  focus?: { conceptId: string; parentLessonId: string };
+  focus?: { conceptId: string; contextId?: string; parentLessonId: string };
 }
-export interface GuideConcept { id: string; name: string; description: string }
+export interface GuideConcept { id: string; name: string; description: string; contextId?: string }
 export interface ConceptGuide {
+  contextId?: string;
+  verification?: Verification;
   language?: Language;
   conceptId: string;
   version: string;
   createdAt: string;
   title: string;
   description: string;
-  examples: { expression: string; mode?: 'expression' | 'statements'; result: JsonValue; explanation: string; rustType?: string }[];
+  examples: { expression: string; mode?: 'expression' | 'statements' | 'illustration'; result: JsonValue; explanation: string; rustType?: string }[];
   takeaway: string;
   links: { title: string; url: string }[];
 }
 export interface GuideEvent {
+  contextId?: string;
   language?: Language;
   id: string;
   conceptId: string;
@@ -245,7 +350,10 @@ export interface DiscussionContext {
   discussions: Discussion[];
 }
 export interface StoreData {
-  version: 1;
+  version: 1 | 2;
+  knowledgeSeed?: Pick<KnowledgeGraph, 'concepts' | 'contexts' | 'relationships'>;
+  graphRevisions?: GraphRevision[];
+  migration?: { fromVersion: 1; at: string; backupDirectory: string };
   settings: Settings;
   lessons: Lesson[];
   attempts: Attempt[];
@@ -280,6 +388,8 @@ export interface PresentationRevision {
 }
 export interface ProviderStatus { id: ProviderId; available: boolean; version: string; detail: string }
 export interface TutorContext {
+  knowledge?: KnowledgeGraph;
+  environments?: ExecutionEnvironment[];
   settings: Settings;
   history: { lesson: Lesson; attempts: Attempt[] }[];
   hypotheses: Hypothesis[];
@@ -291,11 +401,12 @@ export interface TutorContext {
   skillRetrofits?: SkillRetrofit[];
   repair?: string[];
   draft?: ProposedLesson;
-  focus?: { concept: GuideConcept; parentLessonId: string; avoidQuestions?: ProposedQuestion[] };
+  focus?: { concept: GuideConcept; contextId?: string; parentLessonId: string; avoidQuestions?: ProposedQuestion[] };
   guideEvents?: GuideEvent[];
   focusHistory?: { lessonId: string; parentLessonId: string; conceptId: string; language?: Language; answered: number; total: number; endedEarly: boolean }[];
 }
 export interface Job {
+  contextId?: string;
   id: string;
   status: 'running' | 'ready' | 'error' | 'cancelled';
   stage: string;
@@ -315,6 +426,10 @@ export interface Metrics {
   byPurpose: { purpose: Purpose; count: number; accuracy: number | null }[];
 }
 export interface PublicQuestion {
+  kind?: ProposedQuestion['kind'];
+  contextId?: string;
+  contextName?: string;
+  proposedAnswer?: string;
   language?: Language;
   id: string;
   title: string;
@@ -324,6 +439,8 @@ export interface PublicQuestion {
   testCount: number;
 }
 export interface Review {
+  contextId?: string;
+  contextName?: string;
   language?: Language;
   attempt: Attempt;
   question: Exercise;
@@ -334,6 +451,7 @@ export interface Review {
   teachingBeforeAnswer?: string[];
 }
 export interface LessonSummary {
+  contextIds?: string[];
   language?: Language;
   id: string;
   objective: string;
@@ -355,6 +473,10 @@ export interface LessonSummary {
   endedEarly?: boolean;
 }
 export interface AppState {
+  contexts?: LearningContext[];
+  environments?: ExecutionEnvironment[];
+  knowledge?: KnowledgeGraph;
+  conceptMemory?: ConceptRecord[];
   languages?: { id: Language; available: boolean; detail: string }[];
   settings: Settings;
   providers: ProviderStatus[];

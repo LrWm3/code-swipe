@@ -265,7 +265,7 @@ test('given inappropriate stage order or demand, when sequencing, then warmup pr
     { edit: p => { p.questions[0].plan!.stage = 'build'; }, expected: /approachable warmup/ },
     { edit: p => { p.questions[0].plan!.cognitiveDemand = 3; }, expected: /approachable warmup/ },
     { edit: p => { p.questions[3].plan!.cognitiveDemand = 2.5; }, expected: /integer from 1 to 5/ },
-    { edit: p => { p.questions[2].plan!.cognitiveDemand = 4; }, expected: /jump by more than 1/ },
+    { edit: p => { p.questions[2].plan!.cognitiveDemand = 4; }, expected: /at most 1/ },
     { edit: p => { p.questions[2].plan!.cognitiveDemand = 1; }, expected: /cannot decrease/ },
     { edit: p => { p.questions[3].plan!.stage = 'warmup'; }, expected: /stages must progress/ },
     { edit: p => { p.questions[3].plan!.stage = 'stretch'; p.questions[3].plan!.cognitiveDemand = 3; }, expected: /second half/ },

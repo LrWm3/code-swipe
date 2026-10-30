@@ -2,8 +2,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ConceptGuide, GuideConcept, DiscussionContext, ProposedDiscussion, ProposedLesson, ProviderId, ProviderStatus, TutorContext } from '../src/types.ts';
-import { guidePrompt, guideSchema, parseGuide } from './concept-guides.ts';
+import type { ConceptGuide, GuideConcept, DiscussionContext, ProposedDiscussion, ProposedLesson, ProviderId, ProviderStatus, TutorContext, LearningContext } from '../src/types.ts';
+import { guidePrompt, guideSchema, parseGuide, contextGuidePrompt, contextGuideSchema, parseContextGuide, guideIsExecutable } from './concept-guides.ts';
 import { buildDiscussionPrompt, discussionOutputSchema, parseDiscussionOutput } from './discussion.ts';
 import { buildTutorPrompt, lessonSchemaForBatch, parseLessonOutput } from './prompts.ts';
 
@@ -271,10 +271,10 @@ async function runStructuredTutor(
 
 export async function generateLesson(context: TutorContext, options: GenerationOptions): Promise<ProposedLesson> {
   const raw = await runStructuredTutor(context.settings, {
-    prompt: buildTutorPrompt(context), schema: lessonSchemaForBatch(context.settings.batchSize), subject: 'lesson',
+    prompt: buildTutorPrompt(context), schema: lessonSchemaForBatch(context.settings.batchSize, Boolean(context.knowledge)), subject: 'lesson',
   }, options);
   if (options.signal.aborted) throw abortError();
-  const lesson = parseLessonOutput(raw);
+  const lesson = parseLessonOutput(raw, Boolean(context.knowledge));
   if (lesson.questions.length !== context.settings.batchSize) throw new Error('Tutor returned the wrong batch size. Retry generation.');
   if (context.settings.tutorMode === 'baseline' && (lesson.hypotheses.length || lesson.questions.some(question => question.hypothesisId !== null))) throw new Error('Baseline tutor returned a persistent learner hypothesis. Retry generation.');
   return lesson;
@@ -288,7 +288,12 @@ export async function generateDiscussion(context: DiscussionContext, options: Ge
   return parseDiscussionOutput(raw);
 }
 
-export async function generateGuide(settings: TutorContext['settings'], concept: GuideConcept, options: GenerationOptions): Promise<ConceptGuide> {
+export async function generateGuide(settings: TutorContext['settings'], concept: GuideConcept, options: GenerationOptions, context?: LearningContext): Promise<ConceptGuide> {
+  if (context && !guideIsExecutable(context)) {
+    const raw = await runStructuredTutor(settings, { prompt: contextGuidePrompt(concept, context), schema: contextGuideSchema, subject: 'guide' }, options);
+    if (options.signal.aborted) throw abortError();
+    return parseContextGuide(raw, concept, context);
+  }
   const language = settings.language ?? 'javascript';
   const raw = await runStructuredTutor(settings, { prompt: guidePrompt(concept, language), schema: guideSchema, subject: 'guide' }, options);
   return parseGuide(raw, concept, options.signal, language);

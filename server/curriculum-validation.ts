@@ -1,5 +1,6 @@
 import type { ConceptUpdate, ProposedLesson, ProposedQuestion, QuestionPlan, TutorContext } from '../src/types.ts';
 import { questionSkills, interpretSkill, supportingEvidence, familiaritySupport, validateSkillUses } from './skill-evidence.ts';
+import { canonicalId } from './knowledge-graph.ts';
 
 export class CurriculumValidationError extends Error {
   constructor(path: string, detail: string) {
@@ -49,11 +50,12 @@ function priorState(context: TutorContext): PriorState {
   const seenAttempts = new Set<string>();
   const excludedAttempts = new Set<string>();
   const retrofits = new Map((context.skillRetrofits ?? []).flatMap(item => item.questions.map(entry => [entry.exerciseId, entry] as const)));
+  const resolve = (id: string) => canonicalId(id, context.knowledge?.aliases);
   for (const { lesson, attempts } of context.history) {
     for (const question of lesson.questions) {
       if (!question.plan) continue;
       const previous = state.families.get(question.plan.familyId);
-      state.families.set(question.plan.familyId, { conceptIds: question.plan.conceptIds, asked: previous?.asked ?? false });
+      state.families.set(question.plan.familyId, { conceptIds: [...new Set(question.plan.conceptIds.map(resolve))], asked: previous?.asked ?? false });
     }
     for (const attempt of attempts) {
       seenAttempts.add(attempt.id);
@@ -62,9 +64,9 @@ function priorState(context: TutorContext): PriorState {
         excludedAttempts.add(attempt.id);
         continue;
       }
-      const skills = questionSkills(question, retrofits.get(question.id)).map(({ use, source }) => ({ id: use.conceptId, ...interpretSkill(use, source, attempt) }));
+      const skills = questionSkills(question, retrofits.get(question.id)).map(({ use, source }) => ({ id: resolve(use.conceptId), ...interpretSkill(use, source, attempt) }));
       for (const skill of skills) state.exposed.add(skill.id);
-      if (question.plan) state.families.set(question.plan.familyId, { conceptIds: question.plan.conceptIds, asked: true });
+      if (question.plan) state.families.set(question.plan.familyId, { conceptIds: [...new Set(question.plan.conceptIds.map(resolve))], asked: true });
       if (attempt.flagged) {
         excludedAttempts.add(attempt.id);
         continue;
@@ -142,6 +144,7 @@ function overlap(left: string[], right: string[]): number {
 export function mirrors(left: ProposedQuestion, right: ProposedQuestion): boolean {
   const specification = (value: string) => value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
   if (specification(left.specification) === specification(right.specification)) return true;
+  if (left.kind === 'answer-review' || right.kind === 'answer-review') return left.kind === right.kind && specification(left.referenceAnswer ?? '') === specification(right.referenceAnswer ?? '') && Boolean(left.referenceAnswer?.trim());
   const leftTokens = codeTokens(left.referenceCode, left.signature?.name ?? 'solve');
   const rightTokens = codeTokens(right.referenceCode, right.signature?.name ?? 'solve');
   if (leftTokens.join('\0') === rightTokens.join('\0')) return true;
@@ -167,6 +170,7 @@ function suppliedScaffolding(question: ProposedQuestion, concept: ConceptUpdate)
 export function validateCurriculum(lesson: ProposedLesson, context: TutorContext): void {
   if (!lesson.curriculum) reject('curriculum', 'is required for every new lesson.');
   const curriculum = lesson.curriculum;
+  const contextual = Boolean(curriculum.knowledge);
   const baseline = context.settings.tutorMode === 'baseline';
   const prior = priorState(context);
   const familyConflicts = lesson.questions.flatMap((question, index) => {
@@ -188,9 +192,9 @@ export function validateCurriculum(lesson: ProposedLesson, context: TutorContext
     if (updates.has(concept.id)) reject(`${path}.id`, 'must be unique in this lesson.');
     const name = normalized(concept.name);
     if (!name) reject(`${path}.name`, 'must describe a concept.');
-    if (known.has(concept.id) && normalized(known.get(concept.id)!.name) !== name) reject(`${path}.name`, 'retain the existing normalized concept name and ID; revise the description without erasing prior identity.');
+    if (!contextual && known.has(concept.id) && normalized(known.get(concept.id)!.name) !== name) reject(`${path}.name`, 'retain the existing normalized concept name and ID; revise the description without erasing prior identity.');
     const previousId = names.get(name);
-    if (previousId && previousId !== concept.id) reject(`${path}.id`, `reuse existing concept ID "${previousId}" for this normalized name; renaming cannot erase prior exposure.`);
+    if (!contextual && previousId && previousId !== concept.id) reject(`${path}.id`, `reuse existing concept ID "${previousId}" for this normalized name; renaming cannot erase prior exposure.`);
     names.set(name, concept.id);
     updates.set(concept.id, concept);
     definitions.set(concept.id, concept);
@@ -295,7 +299,10 @@ export function validateCurriculum(lesson: ProposedLesson, context: TutorContext
     if (!Number.isInteger(plan.cognitiveDemand) || plan.cognitiveDemand < 1 || plan.cognitiveDemand > 5) reject(`${path}.cognitiveDemand`, 'must be an integer from 1 to 5.');
     if (index === 0 && (plan.stage !== 'warmup' || plan.cognitiveDemand > 2)) reject(path, 'begin with an approachable warmup at cognitiveDemand 1 or 2.');
     if (previous && stageOrder[plan.stage] < stageOrder[previous.stage]) reject(`${path}.stage`, 'stages must progress warmup -> build -> optional stretch -> consolidate.');
-    if (previous && plan.stage !== 'consolidate' && (plan.cognitiveDemand < previous.cognitiveDemand || plan.cognitiveDemand > previous.cognitiveDemand + 1)) reject(`${path}.cognitiveDemand`, 'before consolidation, demand cannot decrease or jump by more than 1.');
+    const contextSwitch = contextual && index > 0 && question.contextId !== lesson.questions[index - 1].contextId;
+    if (previous && plan.stage !== 'consolidate' && ((!contextSwitch && plan.cognitiveDemand < previous.cognitiveDemand) || plan.cognitiveDemand > previous.cognitiveDemand + 1)) reject(`${path}.cognitiveDemand`, 'before consolidation, demand cannot decrease within one context and can increase by at most 1; a context switch may lower demand for a bridge.');
+    if (contextSwitch && normalized(plan.difficultyRationale).split(' ').length < 6) reject(`${path}.difficultyRationale`, 'explain the context switch and its cognitive demand.');
+    if (contextual && normalized(plan.scaffolding).split(' ').length < 5) reject(`${path}.scaffolding`, 'explain preparation, support, diagnostic intent, or why exploration is reasonable.');
     if (previous && plan.stage === 'consolidate' && plan.cognitiveDemand > previous.cognitiveDemand) reject(`${path}.cognitiveDemand`, 'consolidation must maintain or lower the preceding demand.');
     if (plan.stage === 'warmup') warmups++;
     if (plan.stage === 'build') hasBuild = true;
@@ -310,7 +317,7 @@ export function validateCurriculum(lesson: ProposedLesson, context: TutorContext
         }
       }
       for (const id of [...plan.conceptIds, ...plan.prerequisiteIds]) gather(id);
-      for (const id of prerequisites) {
+      for (const id of contextual ? [] : prerequisites) {
         const supported = [...prior.evidence.values()].some(entry => entry.supportingIds.has(id));
         if (!supported && !earlier.has(id) && !suppliedScaffolding(question, definitions.get(id)!)) missingPrerequisites.push(`${path}.prerequisiteIds: stretch prerequisite "${id}" needs prior supporting evidence (including scaffolded success), earlier preparation, or explicit scaffolding on this card`);
       }
@@ -332,10 +339,11 @@ export function validateCurriculum(lesson: ProposedLesson, context: TutorContext
   curriculum.frontier.forEach((entry, index) => {
     const path = `curriculum.frontier[${index}]`;
     references([entry.conceptId], `${path}.conceptId`);
-    if (frontierIds.has(entry.conceptId)) reject(`${path}.conceptId`, 'list each frontier concept once.');
-    frontierIds.add(entry.conceptId);
-    if (entry.decision === 'introduce' && !targets.has(entry.conceptId)) reject(`${path}.decision`, 'an introduced frontier concept must be targeted in this lesson.');
-    if (entry.decision === 'defer' && targets.has(entry.conceptId)) reject(`${path}.decision`, 'a deferred frontier concept cannot be targeted in this lesson.');
+    const key = contextual ? `${entry.conceptId}\0${entry.contextId}` : entry.conceptId;
+    if (frontierIds.has(key)) reject(`${path}.conceptId`, 'list each frontier concept/context once.');
+    frontierIds.add(key);
+    if (!contextual && entry.decision === 'introduce' && !targets.has(entry.conceptId)) reject(`${path}.decision`, 'an introduced frontier concept must be targeted in this lesson.');
+    if (!contextual && entry.decision === 'defer' && targets.has(entry.conceptId)) reject(`${path}.decision`, 'a deferred frontier concept cannot be targeted in this lesson.');
   });
 
   let pairs = 0;

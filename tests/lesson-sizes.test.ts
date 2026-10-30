@@ -60,7 +60,7 @@ test('given a twelve-card lesson, when passing through the CLI response contract
   assert.deepEqual(parseLessonOutput(JSON.stringify(wire)), proposal);
   assert.equal(lessonSchemaForBatch(12).properties?.questions.minItems, 12);
   assert.equal(lessonSchemaForBatch(12).properties?.questions.maxItems, 12);
-  assert.match(buildTutorPrompt(context), /Produce exactly 12 short JavaScript questions/);
+  assert.match(buildTutorPrompt(context), /Prepare exactly 12 cards/);
   wire.questions.push(structuredClone(wire.questions[0]));
   assert.throws(() => parseLessonOutput(JSON.stringify(wire)), /invalid item count/);
 });

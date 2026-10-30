@@ -29,6 +29,7 @@ test('given an optional guide and focused practice, when returning to the main l
   const artifact = readFileSync(join(store.directory, 'plans', `${parent.id}.json`), 'utf8');
   assert.deepEqual(store.previewConcepts().map(item => item.id), ['demo-code-review']);
   tutor.prepareGuide('demo-code-review');
+  await tutor.settled();
   assert.equal(store.snapshot().guides?.[0].examples.length, 2);
   store.recordGuideEvent('demo-code-review', 'opened');
   store.recordGuideEvent('demo-code-review', 'unclear');
@@ -59,7 +60,7 @@ test('given an optional guide and focused practice, when returning to the main l
   assert.equal(review.question.prediction.pCorrect, parent.questions[0].prediction.pCorrect);
   const prompt = buildTutorPrompt(reopened.context());
   assert.match(prompt, /guideEvents/);
-  assert.match(prompt, /self-report, never evidence of competence/);
+  assert.match(prompt, /Reading guides or claiming familiarity is exposure\/self-report only/);
 });
 
 test('given focused demo practice, when choosing six cards, then every card is validated and targets the selected concept', async t => {

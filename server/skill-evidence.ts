@@ -10,7 +10,8 @@ export function validateSkillUses(value: unknown, targets?: string[], prerequisi
   if (!Array.isArray(value) || !value.length || value.length > 12) throw new Error('skillUses requires 1–12 explicit skill roles.');
   const seen = new Set<string>();
   for (const use of value) {
-    if (!use || typeof use !== 'object' || Object.keys(use).sort().join(',') !== 'conceptId,ifCorrect,ifIncorrect,rationale,role,support'
+    if (!use || typeof use !== 'object' || Object.keys(use).filter(key => key !== 'contextId').sort().join(',') !== 'conceptId,ifCorrect,ifIncorrect,rationale,role,support'
+      || (use.contextId !== undefined && !/^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(use.contextId))
       || !/^[a-zA-Z][a-zA-Z0-9_-]{0,79}$/.test(use.conceptId)
       || !['target', 'exercised', 'incidental'].includes(use.role) || !['independent', 'scaffolded'].includes(use.support)
       || !['supports', 'inconclusive'].includes(use.ifCorrect) || !['challenges', 'inconclusive'].includes(use.ifIncorrect)
@@ -36,7 +37,7 @@ export function questionSkills(question: ProposedQuestion, retrofit?: SkillRetro
 }
 
 export function interpretSkill(use: SkillUse, source: SkillEvidence['source'], attempt: Attempt): SkillEvidence {
-  return { role: use.role, support: use.support, source, rationale: use.rationale,
+  return { role: use.role, support: use.support, source, rationale: use.rationale, ...(use.contextId ? { contextId: use.contextId } : {}),
     signal: attempt.flagged || attempt.correct === null || source === 'legacy' || use.role === 'incidental' ? 'inconclusive'
       : attempt.correct ? use.ifCorrect : use.role === 'target' ? use.ifIncorrect : 'inconclusive' };
 }

@@ -70,8 +70,9 @@ test('given a Python demo and an existing JavaScript notebook, when practicing a
   assert.ok(lesson.questions.every(question => question.signature?.name.includes('_')));
   assert.ok(lesson.questions.every(question => question.code.includes('    """')));
   assert.equal(store.publicState([], null).question?.language, 'python');
-  assert.equal(store.publicState([], null).metrics.count, 0, 'JavaScript judgments are not counted as Python predictions.');
+  assert.equal(store.publicState([], null).metrics.count, 6, 'Aggregate predictions include all learning contexts.');
   service.prepareGuide('python-demo-code-review', 'python');
+  await service.settled();
   store.recordGuideEvent('python-demo-code-review', 'opened', 'python');
   service.plan({ conceptId: 'python-demo-code-review', length: 4, language: 'python' }); await service.settled();
   assert.equal(service.job?.status, 'ready', service.job?.message);
@@ -82,12 +83,12 @@ test('given a Python demo and an existing JavaScript notebook, when practicing a
   store.answer(focus.questions[0].id, focus.questions[0].verdict, 1000);
   store.resumeParent();
   assert.equal(store.activeLesson()?.id, lesson.id);
-  assert.equal(store.publicState([], null).metrics.count, 1);
+  assert.equal(store.publicState([], null).metrics.count, 7);
   assert.equal(readFileSync(join(directory, 'plans', `${earlier.id}.json`), 'utf8'), artifact);
   const original = store.snapshot();
   assert.deepEqual(new LocalStore(directory).snapshot(), original);
-  assert.match(buildTutorPrompt(store.context()), /Python questions/);
-  assert.doesNotMatch(buildTutorPrompt(store.context()), /multiline JSDoc/);
+  assert.match(buildTutorPrompt(store.context()), /"preferredContexts":\["python"\]/);
+  assert.match(buildTutorPrompt(store.context()), /Python docstrings/);
 });
 
 test('given a missing Python sandbox, when starting a Python lesson, then the app reports setup guidance without publishing a plan', t => {

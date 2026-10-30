@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
@@ -57,13 +57,11 @@ test('given Result values and Rust example guides, when checking and displaying 
   await assert.rejects(parseGuide(JSON.stringify(guide), { id: 'rust-option', name: 'Options', description: 'Optional values.' }, undefined, 'rust'), /did not produce/);
 });
 
-test('given a real Rust compiler error, when it is an ownership bug, then the diagnostic is usable but unsupported code and timeouts are rejected', sandbox, async () => {
+test('given a Rust compiler error, when checking an ownership or type bug, then compilation rejects the candidate and timeouts are not evidence', sandbox, async () => {
   const signature = { name: 'count_values', parameters: ['values'] };
   const moved = '/// Count values.\nfn count_values(values: Vec<i64>) -> usize { let moved = values; values.len() + moved.len() }';
-  const result = await executeRustBatch(moved, [[[1]], [[]]], 'example', undefined, signature, true);
-  assert.match(result[0].compilationError!, /E0382.*moved/);
-  await assert.rejects(executeRustBatch(moved, [[[1]]], 'example', undefined, signature), /did not compile/);
-  await assert.rejects(executeRustBatch('/// Count values.\nfn count_values(values: Vec<i64>) -> usize { nonexistent::value() }', [[[1]]], 'example', undefined, signature, true), /unsupported diagnostic/);
+  await assert.rejects(executeRustBatch(moved, [[[1]]], 'example', undefined, signature), /compilation failed/);
+  await assert.rejects(executeRustBatch('/// Count values.\nfn count_values(values: Vec<i64>) -> usize { nonexistent::value() }', [[[1]]], 'example', undefined, signature), /compilation failed/);
   await assert.rejects(executeRustBatch('/// Count values.\nfn count_values(values: Vec<i64>) -> usize { loop {} }', [[[1]]], 'example', undefined, signature), /timed out or failed/);
   await assert.rejects(executeRustBatch('/// Count values.\nfn count_values(values: Vec<i64>) -> Option<Option<i64>> { Some(None) }', [[[1]]], 'example', undefined, signature), /Nested Option/);
 });
@@ -76,7 +74,7 @@ test('given a running Rust validation, when cancelled, then the isolated executi
   await assert.rejects(pending, /cancelled/);
 });
 
-test('given a Rust lesson with an ownership bug, when validating and answering, then the review preserves the compiler diagnostic', { ...sandbox, timeout: 90_000 }, async t => {
+test('given a Rust lesson with a compiler-only ownership bug, when validating, then the draft is rejected before commitment', { ...sandbox, timeout: 90_000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'swipe-rust-test-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const store = new LocalStore(directory);
@@ -86,16 +84,9 @@ test('given a Rust lesson with an ownership bug, when validating and answering, 
   question.code = `${doc}fn keep_nonnegative_readings(readings: Vec<i64>) -> Vec<i64> {\n    let moved = readings;\n    if readings.is_empty() { return Vec::new(); }\n    moved.into_iter().filter(|value| *value >= 0).collect()\n}`;
   question.referenceCode = `${doc}fn keep_nonnegative_readings(readings: Vec<i64>) -> Vec<i64> { readings.into_iter().filter(|value| *value >= 0).collect() }`;
   question.explanation = 'The first assignment moves readings, so the later use does not compile.';
-  const checked = await validateLesson(proposal, context);
-  assert.match(checked.reports[0].compilationError!, /E0382/);
-  assert.equal(checked.reports[0].passedCount, 0);
-  store.commitLesson(checked, context.settings);
-  const lesson = store.activeLesson()!; const artifact = readFileSync(join(directory, 'plans', `${lesson.id}.json`), 'utf8');
-  const review = store.answer(lesson.questions[0].id, 'buggy', 1000);
-  assert.equal(review.attempt.correct, true);
-  assert.match(review.question.validation.compilationError!, /E0382/);
-  assert.equal(readFileSync(join(directory, 'plans', `${lesson.id}.json`), 'utf8'), artifact);
-  assert.equal(new LocalStore(directory).activeLesson()?.language, 'rust');
+  await assert.rejects(validateLesson(proposal, context), /Rust compilation failed.*E0382/s);
+  assert.equal(store.snapshot().lessons.length, 0);
+
 });
 
 test('given an unavailable Rust sandbox, when starting a lesson, then setup guidance appears and no lesson is published', t => {

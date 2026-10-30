@@ -2,12 +2,16 @@ import { getQuickJS } from 'quickjs-emscripten';
 import type { FunctionSignature, JsonValue, ProposedLesson, TutorContext, ValidationReport } from '../src/types.ts';
 import { LESSON_SIZES } from '../src/lesson-sizes.ts';
 import { PURPOSES } from '../src/types.ts';
-import { curriculumSchema, questionPlanSchema, validateSchema } from './prompts.ts';
+import { curriculumSchema, questionPlanSchema, contextualQuestionPlanSchema, validateSchema } from './prompts.ts';
 import { mirrors, validateCurriculum } from './curriculum-validation.ts';
 import { questionSkills } from './skill-evidence.ts';
 import { validateArguments, validatePythonQuestionFormat, validateQuestionFormat, validateSignature } from './question-format.ts';
 import { executePython } from './python-runtime.ts';
 import { executeRustBatch, validateRustQuestionFormat } from './rust-runtime.ts';
+import { prepareContextualLesson, curriculumValidationView, validateContextualQuestions } from './context-validation.ts';
+import { executionEnvironments } from './environments.ts';
+import { canonicalId } from './knowledge-graph.ts';
+import { questionContext } from '../src/learning-contexts.ts';
 
 const MAX_PAYLOAD = 180_000;
 const MAX_VALUE = 16_000;
@@ -105,6 +109,12 @@ function canonical(value: JsonValue): string {
 
 function structure(proposal: unknown, context: TutorContext): ProposedLesson {
   checkJSON(proposal);
+  const contextual = Boolean((proposal as unknown as ProposedLesson)?.curriculum?.knowledge);
+  let graph: ReturnType<typeof prepareContextualLesson>['graph'];
+  if (contextual) {
+    try { const prepared = prepareContextualLesson(proposal as unknown as ProposedLesson, context); proposal = prepared.lesson; graph = prepared.graph; }
+    catch (error) { reject('curriculum.knowledge', (error as Error).message); }
+  }
   const lesson = object(proposal, 'lesson', ['objective', 'rationale', 'assumptions', 'reflection', 'hypotheses', 'questions', 'curriculum']);
   string(lesson.objective, 'objective', 600);
   string(lesson.rationale, 'rationale', 2_000);
@@ -142,17 +152,24 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
   const unique = { title: new Set<string>(), code: new Set<string>() };
   for (let i = 0; i < questions.length; i++) {
     const path = `questions[${i}]`;
-    const question = object(questions[i], path, ['title', 'specification', 'code', 'referenceCode', 'verdict', 'explanation', 'tests', 'purpose', 'hypothesisId', 'ifCorrect', 'ifIncorrect', 'prediction', 'plan', ...((questions[i] as Record<string, unknown>)?.signature !== undefined ? ['signature'] : [])]);
+    const question = object(questions[i], path, ['title', 'specification', 'code', 'referenceCode', 'verdict', 'explanation', 'tests', 'purpose', 'hypothesisId', 'ifCorrect', 'ifIncorrect', 'prediction', 'plan', ...((questions[i] as Record<string, unknown>)?.signature !== undefined ? ['signature'] : []), ...(contextual ? ['kind', 'contextId', 'verification', 'proposedAnswer', 'referenceAnswer', ...((questions[i] as ProposedLesson['questions'][number]).language !== undefined ? ['language'] : [])] : [])]);
+    const language = contextual ? question.language : context.settings.language;
+    const executed = !contextual || (question.verification as ProposedLesson['questions'][number]['verification'])?.mode === 'execute';
     string(question.title, `${path}.title`, 140);
     string(question.specification, `${path}.specification`, 2_000);
-    string(question.code, `${path}.code`, 6_000);
-    string(question.referenceCode, `${path}.referenceCode`, 6_000);
-    if (['python', 'rust'].includes(context.settings.language ?? '') && question.signature === undefined) reject(`${path}.signature`, 'is required for Python and Rust questions.');
-    if (question.signature !== undefined) {
+    if (question.kind === 'answer-review') {
+      string(question.proposedAnswer, `${path}.proposedAnswer`, 6_000);
+      string(question.referenceAnswer, `${path}.referenceAnswer`, 6_000);
+    } else {
+      string(question.code, `${path}.code`, 6_000);
+      string(question.referenceCode, `${path}.referenceCode`, 6_000);
+    }
+    if (executed && ['python', 'rust'].includes(language as string) && question.signature === undefined) reject(`${path}.signature`, 'is required for Python and Rust questions.');
+    if (executed && question.signature !== undefined) {
       try {
         const formatted = question as unknown as { signature: FunctionSignature; code: string; referenceCode: string };
-        if (context.settings.language === 'python') validatePythonQuestionFormat(formatted);
-        else if (context.settings.language === 'rust') validateRustQuestionFormat(formatted);
+        if (language === 'python') validatePythonQuestionFormat(formatted);
+        else if (language === 'rust') validateRustQuestionFormat(formatted);
         else validateQuestionFormat(formatted);
       }
       catch (error) { reject(path, (error as Error).message); }
@@ -162,13 +179,13 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
     string(question.ifIncorrect, `${path}.ifIncorrect`, 1_000);
     // Paired probes may share a specification while changing representation.
     for (const key of ['title', 'code'] as const) {
-      const normalized = (question[key] as string).trim().replace(/\s+/g, ' ');
+      const normalized = (key === 'code' && question.kind === 'answer-review' ? question.proposedAnswer as string : question[key] as string).trim().replace(/\s+/g, ' ');
       if (unique[key].has(normalized)) reject(`${path}.${key}`, `duplicates another question's ${key}; provide a distinct exercise.`);
       unique[key].add(normalized);
     }
     oneOf(question.verdict, `${path}.verdict`, ['correct', 'buggy']);
     oneOf(question.purpose, `${path}.purpose`, [...PURPOSES]);
-    try { validateSchema(question.plan, questionPlanSchema, `${path}.plan`); }
+    try { validateSchema(question.plan, contextual ? contextualQuestionPlanSchema : questionPlanSchema, `${path}.plan`); }
     catch (error) { reject(path, (error as Error).message); }
     if (context.focus && !(question.plan as NonNullable<ProposedLesson['questions'][number]['plan']>).conceptIds.includes(context.focus.concept.id)) reject(`${path}.plan.conceptIds`, 'focused practice must target the selected concept.');
     if ((question.plan as ProposedLesson['questions'][number]['plan'])!.purposes.includes('retention')) {
@@ -177,7 +194,7 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
       const candidates = new Map<string, string>();
       for (const concept of context.curriculum?.concepts ?? []) {
         if (targetConcepts.includes(concept.id)) for (const evidence of concept.evidence) {
-          if (evidence.role && evidence.role !== 'incidental' && evidence.source !== 'legacy') candidates.set(evidence.attemptId, evidence.answeredAt);
+          if (evidence.role && evidence.role !== 'incidental' && evidence.source !== 'legacy' && (!contextual || evidence.contextId === question.contextId)) candidates.set(evidence.attemptId, evidence.answeredAt);
         }
       }
       for (const { lesson: previous, attempts } of context.history) for (const attempt of attempts) {
@@ -185,7 +202,7 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
         const previousQuestion = previous.questions.find(item => item.id === attempt.exerciseId);
         if (!attemptIds.has(attempt.id) || !previousQuestion) continue;
         const retrofit = context.skillRetrofits?.flatMap(item => item.questions).find(item => item.exerciseId === previousQuestion.id);
-        const linked = questionSkills(previousQuestion, retrofit).some(({ use, source }) => source !== 'legacy' && use.role !== 'incidental' && targetConcepts.includes(use.conceptId));
+        const linked = questionSkills(previousQuestion, retrofit).some(({ use, source }) => source !== 'legacy' && use.role !== 'incidental' && targetConcepts.includes(canonicalId(use.conceptId, graph?.aliases ?? context.knowledge?.aliases)) && (!contextual || (use.contextId ?? questionContext(previousQuestion, previous)) === question.contextId));
         if (linked) candidates.set(attempt.id, attempt.answeredAt);
       }
       if (context.settings.tutorMode === 'baseline' || ![...candidates].some(([id, at]) => Date.now() - Date.parse(at) >= 86_400_000 && (lesson.rationale as string).includes(id))) {
@@ -198,7 +215,7 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
     const prediction = object(question.prediction, `${path}.prediction`, ['pCorrect', 'rationale']);
     if (typeof prediction.pCorrect !== 'number' || !Number.isFinite(prediction.pCorrect) || prediction.pCorrect < 0 || prediction.pCorrect > 1) reject(`${path}.prediction.pCorrect`, 'must be a finite number between 0 and 1, not a string.');
     string(prediction.rationale, `${path}.prediction.rationale`, 1_000);
-    const tests = list(question.tests, `${path}.tests`, 4, 12);
+    const tests = list(question.tests, `${path}.tests`, executed ? 4 : 0, executed ? 12 : 0);
     const inputs = new Set<string>();
     for (let j = 0; j < tests.length; j++) {
       const testPath = `${path}.tests[${j}]`;
@@ -210,7 +227,7 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
         catch (error) { reject(testPath, (error as Error).message); }
       }
       checkJSON(test.expected, `${testPath}.expected`, MAX_VALUE);
-      if (context.settings.language === 'python' || context.settings.language === 'rust') {
+      if (language === 'python' || language === 'rust') {
         const pending: unknown[] = [test.input, test.expected];
         while (pending.length) {
           const value = pending.pop();
@@ -224,8 +241,13 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
     }
   }
   try {
-    validateSchema(lesson.curriculum, curriculumSchema, 'curriculum');
-    validateCurriculum(proposal as unknown as ProposedLesson, context);
+    if (contextual) {
+      validateContextualQuestions(proposal as ProposedLesson, context, graph!);
+      validateCurriculum(curriculumValidationView(proposal as ProposedLesson, graph!), { ...context, knowledge: graph! });
+    } else {
+      validateSchema(lesson.curriculum, curriculumSchema, 'curriculum');
+      validateCurriculum(proposal as unknown as ProposedLesson, context);
+    }
   } catch (error) { reject('curriculum', (error as Error).message); }
   // The checks above validate every field without coercing the provider response.
   return proposal as unknown as ProposedLesson;
@@ -413,18 +435,20 @@ export async function validateLesson(proposal: unknown, context: TutorContext, s
   for (let i = 0; i < lesson.questions.length; i++) {
     const question = lesson.questions[i];
     const report: ValidationReport = { checkedAt: new Date().toISOString(), testCount: question.tests.length, passedCount: 0, failures: [] };
-    if (context.settings.language === 'rust') {
+    const language = question.language ?? context.settings.language ?? 'javascript';
+    if (question.verification?.mode === 'unverified') {
+      report.verification = { status: 'unverified', reason: question.verification.reason };
+      reports.push(report); continue;
+    }
+    const environment = (context.environments ?? executionEnvironments()).find(item => item.id === language)!;
+    if (question.verification) report.verification = { status: 'executed', environmentId: environment.id, version: environment.version };
+    if (language === 'rust') {
       const inputs = question.tests.map(test => test.input);
       const reference = await executeRustBatch(question.referenceCode, inputs, `questions[${i}].referenceCode`, signal, question.signature!);
       for (let j = 0; j < question.tests.length; j++) {
         if (reference[j].error !== null || canonical(reference[j].actual) !== canonical(question.tests[j].expected)) reject(`questions[${i}].tests[${j}]`, 'referenceCode does not produce the expected output; repair the reference or fixture before labelling the candidate.');
       }
-      const actual = await executeRustBatch(question.code, inputs, `questions[${i}].code`, signal, question.signature!, question.verdict === 'buggy');
-      if (actual[0]?.compilationError) {
-        report.compilationError = actual[0].compilationError;
-        reports.push(report);
-        continue;
-      }
+      const actual = await executeRustBatch(question.code, inputs, `questions[${i}].code`, signal, question.signature!);
       question.tests.forEach((fixture, j) => {
         const observed = actual[j];
         if (observed.error === null && canonical(observed.actual) === canonical(fixture.expected)) report.passedCount++;
@@ -437,7 +461,7 @@ export async function validateLesson(proposal: unknown, context: TutorContext, s
     }
     const checkFixture = async (j: number) => {
       const fixture = question.tests[j];
-      const run = (code: string, path: string) => context.settings.language === 'python'
+      const run = (code: string, path: string) => language === 'python'
         ? executePython(code, fixture.input, path, signal, question.signature!)
         : execute(code, fixture.input, path, signal, question.signature);
       const reference = await run(question.referenceCode, `questions[${i}].referenceCode (fixture ${j + 1})`);
@@ -447,8 +471,8 @@ export async function validateLesson(proposal: unknown, context: TutorContext, s
     };
     // Two isolated fixtures at a time limit container usage without slowing an
     // entire lesson to one container startup per fixture.
-    for (let j = 0; j < question.tests.length; j += context.settings.language === 'python' ? 2 : 1) {
-      const checks = await Promise.all(Array.from({ length: Math.min(context.settings.language === 'python' ? 2 : 1, question.tests.length - j) }, (_, offset) => checkFixture(j + offset)));
+    for (let j = 0; j < question.tests.length; j += language === 'python' ? 2 : 1) {
+      const checks = await Promise.all(Array.from({ length: Math.min(language === 'python' ? 2 : 1, question.tests.length - j) }, (_, offset) => checkFixture(j + offset)));
       for (const { fixture, observed } of checks) {
       if (observed.error === null && canonical(observed.actual) === canonical(fixture.expected)) report.passedCount++;
       else report.failures.push({ input: fixture.input, expected: fixture.expected, actual: observed.actual, error: observed.error });
