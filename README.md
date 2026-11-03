@@ -1,10 +1,14 @@
-# Code Swipe — local tutor lab
+# Code Swipe - Code tutoring
 
-Code Swipe currently supports **local use only**. Run the app and its server on your own computer; Codex/OpenCode may still use remote model providers.
+Code Swipe is a tool to practice your coding skills by swiping right or left to answer if the presented problem and solution are buggy or not.
 
-Read a little code or a proposed technical answer. Swipe right for correct, left for buggy/incorrect, or choose IDK. Keep playing, and open an explanation whenever you want one.
+![Original Code Swipe gameplay](docs/assets/code-swipe-gameplay.gif)
 
-Code Swipe is built around a single teaching agent, powered by your installed **Codex** or **OpenCode** CLI. It proposes learning directions, sketches a curriculum spanning several short lessons, and adjusts the remaining plan as you learn. It keeps tentative learner hypotheses and commits predictions *before* you answer. No account system, Firebase, subjects, Elo, or mastery tree.
+Code Swipe is built around a single teaching agent, powered by your installed **Codex** or **OpenCode** CLI. 
+
+It proposes learning directions, sketches a curriculum spanning several short lessons, and adjusts the remaining plan as you learn.
+
+As you demonstrate more knowledge, it attempts to present a mix of old and new problems to teach you new things and train your existing knowledge.
 
 ## Try it
 
@@ -32,72 +36,42 @@ docker pull rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7
 
 Restart the server after preparing an image. Setup shows whether each sandbox is available; the app never falls back to running generated Python or Rust directly on your machine.
 
-Choose your provider, preferred contexts, and interests in **Setup**, then explore three learning directions. Preview an explanation and example, choose one, or use **Choose for me** to take the recommendation. Your tutor sketches 2–6 lessons toward a meaningful goal; **Prepare first lesson** starts the cards. The tutor can explore related technologies and domains automatically, or mix two contexts for a deliberate transfer lesson. Excluded contexts and their specializations are avoided. Changes apply to the next lesson; focused practice keeps the guide’s context. Leave the model blank for the CLI default, or enter a Codex model name / OpenCode `provider/model` identifier. Restart the server after installing a missing CLI. Codex requires **0.153.4 or newer** for this app's isolation options; OpenCode was tested with 1.17.13. Setup shows the version found by the server. If it differs from your terminal's version, set `CODE_SWIPE_CODEX_BIN` in `.env` to the supported executable's absolute path.
+### What v1 Does
 
-Drag the card, use the buttons, or press the arrow keys. Answers advance straight to the next card. **Review previous** opens the explanation without interrupting the next question; older answers remain in **Notebook**. IDK records uncertainty without counting as a wrong answer.
+- **Personalized learning:** Suggests three learning paths, recommends one, and builds a flexible 2–6 lesson curriculum that adapts to your progress.
+- **Smart diagnostics:** Tracks mistakes without overreacting. Extra practice is triggered by repeated struggles, not isolated errors.
+- **Intentional questions:** Plans 6–12 questions per lesson, each designed to teach, test, reinforce, or explore specific skills.
+- **Long-term understanding:** Tracks concept familiarity, uncertainty, prerequisites, and progress across lessons while avoiding unnecessary repetition.
+- **Skill-aware grading:** Distinguishes independent mastery from assisted success and recognizes skills practiced within harder problems.
+- **Verified challenges:** Tests coding questions and solutions in isolated sandboxes for JavaScript, Python, and Rust, repairing or rejecting invalid batches.
+- **Reliable progress tracking:** Saves lesson plans, answers, review activity, and feedback without duplicating history.
+- **Tutor conversations:** Lets you discuss lessons with your chosen CLI tutor, with feedback informing future lessons.
+- **Performance measurement:** Tracks prediction accuracy and calibration across tutors and learning contexts, without confusing them with mastery.
+- **Fair baseline:** Compares personalized tutoring against a fresh-context tutor using the same question-generation and validation process.
 
-At the end of a lesson, share any feedback: your reasoning, confusion, corrections, pacing, interests, or what you want next. **Send to tutor** gets a short reflection and up to three optional follow-up questions. Reply to any you want, leave others blank, or select **Review progress & continue**. You can also continue while the tutor is thinking. Notes and replies help the reflective tutor reconsider its assumptions; skips carry no penalty. **Update tutor** lets you discuss further before continuing, and **Notebook** keeps the exchange.
+## Knowledge & Contexts
 
-You can mark accidental answers before requesting the next batch. Those answers stay in your record but are excluded from evidence and metrics. Flawed exercises can also be flagged in their review. Feedback can change the tutor's interpretation without changing old grades or predictions.
+We attempt to have the agent prepare topics with multiple lessons, then once that topic is complete, present new topics you may be interested in learning as the next direction.
 
-The demo uses curated examples and neutral predictions. It is not adaptive. For the actual experiment, switch to Codex or OpenCode.
+- **Personal knowledge graph:** Builds a growing map of what you know, how concepts connect, and where you can apply them.
+- **Context-aware progress:** Tracks understanding across different languages and tools, without assuming a skill learned in one transfers automatically to another.
+- **Connected learning:** Organizes topics, concepts, techniques, and skills to reveal relationships and guide future lessons.
+- **Learning notebook:** Browse your knowledge by topic, filter by context, review evidence, and access personalized study guides.
+- **Continuous improvement:** Refines and connects knowledge records as you learn, while preserving your history and progress.
+- **Safe upgrades:** Existing notebooks update automatically without losing lessons, answers, or learning history.
 
-## What this v1 does
+## Local Data & AI Integration
 
-- Offers three broadly different learning directions, one recommendation, and optional previews with a small example and documentation links. Empty preferences allow the tutor to broaden your education over time.
-- Builds a flexible 2–6 lesson curriculum with observable outcomes and a finish condition. Reviews completed work before generating the next lesson, saves reasons for outline changes, and returns to new choices when the goal has enough supporting evidence.
-- Keeps isolated mistakes as observations. Diagnostic detours require a sustained pattern: at least three attributable errors among the latest five meaningful opportunities for a concept in a context. Explicit requests for help and focused practice remain available at any time.
+Data is stored locally.
 
-- Plans 6, 8, or 12 questions at a time (8 by default), with explicit assumptions, alternative explanations, and predictions.
-- Gives each question educational and investigative objectives, with multiple purposes such as practice, transfer, retention, frontier exploration, or checking a teaching strategy. Lessons record their mix, progression, cognitive demand, and scaffolding; planning checks reject missing or inconsistent annotations.
-- Builds durable concept evidence from the lesson archive, including familiarity, uncertainty, prerequisites, representations, and deferred variants. Each lesson includes at most one closely related pair for a new concept; other counterparts stay deferred or unasked with a reason.
-- Distinguishes skills directly targeted, exercised inside a harder task, and merely present. Meaningful embedded practice can keep older skills in use without repeating their original questions. Each card commits what success or failure could indicate for each skill. Supported scaffolded successes contribute evidence while retaining the context of the help provided; they do not establish independent competence.
-- Runs each reference solution and candidate against generated fixtures in an isolated, resource-limited sandbox: QuickJS for JavaScript and disposable Docker containers for Python and Rust. Both Rust implementations must compile; buggy cards require a behavioral counterexample or runtime failure. Unsupported topics use the same swipe cards and grading, with their lack of independent verification recorded in review. Failed batches get up to three repair attempts before being rejected.
-- Saves immutable plan artifacts before showing a question. Answers append to local history; retries do not duplicate them.
-- Records review openings and estimated active viewing time, so the tutor can account for explanations you chose to inspect. Background or unfocused time is paused.
-- Supports optional conversations after a lesson. Each **Send to tutor** or **Update tutor** requests one bounded response from your selected CLI; the next lesson considers saved feedback and replies.
-- Tracks Brier score and calibration for each provider and tutor mode across learning contexts. These measure prediction quality, not learning or mastery.
-- Offers a fresh-context baseline that gets the same generation and validation pipeline without learner history or persistent hypotheses.
-
-After a lesson, question reviews include optional intent details. Completed lessons reveal curriculum notes in **Notebook**, separating observed answers from the tutor's interpretation and proposed next action. Later observations build on archived evidence without rewriting earlier intent. These planning rules are experimental, not validated pedagogy or a mastery assessment.
-
-Version 4 groups earlier sessions under one **Legacy learning** entry. Their original questions, answers, predictions, guides, and evidence remain intact. Existing lessons remain readable without curriculum annotations. Newly generated lessons include them; a current batch stays fixed, and answers or feedback influence the next lesson.
-
-Skill memory keeps the last targeted encounter, last meaningful exercise, and last independent supporting answer separately. Raw right/wrong counts still describe whole-card judgments, not successes or failures on every component. The tutor uses the evidence and its uncertainty to choose embedded practice or focused checks; there is no automatic forgetting timer. Skill roles and interpretations are model judgments, not proof of the learner's reasoning. An old prerequisite is not credited merely because it appears in a dependency chain.
-
-Executed code exercises are **pure, synchronous JavaScript, Python, or Rust functions** using JSON-compatible test data. Other contexts, such as NumPy, pandas, React, Linux, and networking, can use code or proposed-answer cards without execution. Reviews explicitly say **Not independently verified** for these cards. Their answers contribute to evidence and metrics like other answers until flagged invalid. An executable question that fails its checks must be repaired; it cannot silently become unverified. Descriptive function names and natural parameter lists are used in each language. JavaScript uses multiline JSDoc, Python uses multiline docstrings, and Rust uses `///` documentation and explicit types. Python supports selected standard-library modules. Rust supports common scalar types, strings, vectors, slices, `Option`, `Result`, and string-keyed hash maps, including borrowed inputs; custom structs, mutable references, and third-party dependencies are outside this first version. Tests are finite checks, not proofs: a generated specification, reference solution, or fixture can still be wrong. The flag button exists for that reason.
-
-Before a lesson that may introduce new concepts, an optional preview links to short concept guides. You can skip straight to the cards, read a guide, or request four or six focused practice cards before returning to the main lesson. You can also open related guides from an answer review. Focused practice can be left early; any answers already given are saved. Guides use reviewed examples for a few common concepts and generate others on demand with your selected tutor. Guides and reference links are specific to their learning context. Examples, including multiline snippets, are checked where an execution environment supports the context; other examples retain their lack of verification. Checking examples cannot guarantee the guide's explanation is correct.
-
-Guide opens, completed readings, optional familiarity reports, and focused-practice answers are stored separately from committed lesson plans. Reading a guide or reporting familiarity is not treated as proof of understanding. If you study after a lesson's predictions were committed, review shows that teaching occurred before your answer; the original predictions are preserved.
-
-## Knowledge and contexts
-
-The tutor grows a learner-specific knowledge graph. Concepts describe what you learn; contexts describe where you use it; relationships suggest prerequisites, specializations, connections, and applications. Execution environments describe what the app can actually check. The graph can include topics before a runner exists for them. No dependencies are installed by the agent.
-
-Knowledge records distinguish **topics**, **concepts**, **techniques**, **specific skills**, and **representations**. Topics group related material; techniques and skills connect to the concepts they use. For example, totals by key connect dictionaries with accumulation. A small exercise variation does not automatically become a new fundamental concept. Learner hypotheses remain separate from this organization.
-
-Evidence and familiarity are tracked per concept and context. Success with Python aggregation can motivate a pandas transfer question without establishing familiarity with `groupby()`. A context's parent and a concept's prerequisites never automatically receive credit. Prerequisites guide preparation rather than enforcing a fixed progression. Lessons can lower demand for a bridge into a new context before building again.
-
-**Notebook → Knowledge & contexts** groups learning records by topic and lets you filter by context and record type. Related-practice counts summarize coverage without awarding familiarity to parent topics or concepts. Study guides use broader conceptual explanations for narrow skills, while technique and representation guides retain their focus. You can inspect the original contextual evidence and review identity history. The tutor reuses stable identities and may merge clear equivalents automatically. **Undo merge** rebuilds the derived evidence while preserving archived questions and predictions. General concepts and their specializations remain distinct.
-
-Existing notebooks upgrade on startup after checking their sealed plans: version 2 adds contextual evidence, and version 3 organizes the records by topic and knowledge type. Migration saves a complete state/plan backup under `.code-swipe/backups/knowledge-v1-*`; it does not change original lesson files, hashes, answers, or active progress. To inspect a migration first, run `npm run migrate:knowledge -- --data-dir .code-swipe`. With the server stopped, add `--apply` to perform it. For the organization upgrade, use `npm run migrate:organization -- --data-dir .code-swipe` to preview it; with the server stopped, add `--apply` to save a backup under `.code-swipe/backups/organization-v2-*` and apply it. Existing IDs, evidence, guide versions, answers, and immutable plans stay intact. New parent concepts record related coverage rather than inferred familiarity. These migrations are repeatable without duplicating records. Version 4 adds curricula and a legacy collection, saving a state/plan backup under `.code-swipe/backups/curricula-v3-*`. It preserves an unfinished lesson unless you explicitly cancel it.
-
-## Local data and model calls
-
-History lives in `.code-swipe/`, which Git ignores. The server listens on loopback only. Your browser needs no API key. Codex/OpenCode still sends lesson context to whichever model provider your CLI uses; those requests use your existing account and its normal limits or charges. “Local” describes the app and its storage, not necessarily inference.
-
-The tutor receives recent answered lessons, your lesson notes, optional conversations, review timings, evidence supporting current hypotheses, and concept evidence reconstructed from the archive so older concepts survive the recent-history window. Baseline mode receives none of that history. Reflective mode reuses one tutor session per notebook, provider, and model for directions, curricula, lessons, guides, and discussions. Each task supplies current authoritative records so cancelled drafts and flagged evidence do not become learning history. Baseline calls use fresh sessions. CLI tools, workspace instructions, and plugins remain disabled. OpenCode's global configuration is isolated, so choose a model explicitly if its default is unsuitable. Existing CLI authentication remains in use. Session handles and OpenCode’s dedicated session database live under `.code-swipe/agent-sessions/`; Codex retains its conversation in its normal CLI storage. If a saved session is missing, the app can start another using your notebook.
-
-**Export record** downloads plans and raw answers, including answers for any unfinished lesson. Keep it private if you want to preserve the exercise. Back up the entire data directory to restore it; export is for inspection, not an import format. Run only one server against a given data directory.
-
-Older questions can receive a separate retrospective skill review, stored in `skillRetrofits` and included in exports. Reviews preserve the original lesson files, predictions, grades, feedback, and timestamps. They can guide future teaching, but cannot alone establish the `familiar` label. Flagging an answer also excludes its retrospective evidence.
-
-To import a reviewed annotation file, stop the server first, then run `npm run retrofit:skills -- --data-dir .code-swipe --review PATH` for a dry run. Add `--apply` to back up the state and plans, validate the archive fingerprint, and append the review. Restart the server afterward. Running without `--review` prints the fingerprint and concept IDs for preparing a review. The format is `SkillRetrofit` in `src/types.ts`: review actual specifications, implementations, answers, and feedback; assign roles conservatively and document ambiguity. The command does not invent historical teaching intentions or automatically infer skills from code syntax. Reimporting an identical review does nothing; stale or conflicting reviews are rejected.
-
-Optional settings are listed in [.env.example](.env.example). Copy it to `.env` to change the port, data directory, executable paths, or per-call planning timeout. Cancel/retry is available if a provider stalls. Starting the server again keeps completed work and allows a fresh attempt after an interrupted run.
-
-Older answered questions can also receive a separate presentation revision: clearer wording, descriptive names, and multiline JSDoc. Reviews show the revised version and let you open the original wording and code. Original plans, answers, grades, predictions, and tutor evidence stay unchanged. With the server stopped, use `npm run retrofit:presentation -- --data-dir .code-swipe --review PATH` to check a manually reviewed `PresentationRevision` (defined in `src/types.ts`); add `--apply` to back up and import it. Every original fixture is run against both versions before importing. This checks the saved examples, so the reviewer must also verify that the wording, constraints, and implementation behavior remain equivalent. Revisions are included in exports, and stale or conflicting imports are rejected.
+- **Private local storage:** Lessons, answers, and progress are stored on your device, outside Git.
+- **Your existing AI tools:** Works with Codex or OpenCode using your existing authentication, model preferences, and provider limits.
+- **Personalized context:** The tutor uses your learning history, notes, feedback, and past performance to tailor future lessons.
+- **Persistent tutor memory:** Maintains continuity across sessions while keeping outdated or discarded work out of your learning history.
+- **Baseline mode:** Offers fresh, history-free tutoring for comparison.
+- **Export & backup:** Export your learning records or back up your data to preserve progress.
+- **Historical improvements:** Older lessons can receive updated skill assessments or clearer explanations without changing original answers or grades.
+- **Flexible configuration:** Customize settings, retry stalled requests, and resume learning after interruptions.
 
 ```sh
 npm run lint
@@ -106,8 +80,6 @@ npm run build
 npm start
 ```
 
-See [the architecture notes](docs/local-tutor.md) for the experiment's boundaries and [the original project notes](docs/original-project.md) for its earlier design. The original gameplay recording shows that earlier version:
+See [the architecture notes](docs/local-tutor.md) for the experiment's boundaries and [the original project notes](docs/original-project.md) for its earlier design.
 
-![Original Code Swipe gameplay](docs/assets/code-swipe-gameplay.gif)
-
-Created with Google App Studio
+Originally created with Google App Studio
