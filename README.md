@@ -2,6 +2,8 @@
 
 Code Swipe is a tool to practice your coding skills by swiping right or left to answer if the presented problem and solution are buggy or not.
 
+The swipe model means students can practice a few minutes a day while progressing through lessons. Unlike platforms which require typing out the solution, code-swipe makes learning in short chunks of time tractable.
+
 ![Original Code Swipe gameplay](docs/assets/code-swipe-gameplay.gif)
 
 Code Swipe is built around a single teaching agent, powered by your installed **Codex** or **OpenCode** CLI. 
@@ -37,6 +39,8 @@ docker pull rust:1.89-slim-bookworm@sha256:d7fc7de78bb8c1469933aeecbf801314d30d7
 Restart the server after preparing an image. Setup shows whether each sandbox is available; the app never falls back to running generated Python or Rust directly on your machine.
 
 ### What v1 Does
+
+Code swipe makes it easy to complete a few coding lessons and practice code review in short chunks of time.
 
 - **Personalized learning:** Suggests three learning paths, recommends one, and builds a flexible 2–6 lesson curriculum that adapts to your progress.
 - **Smart diagnostics:** Tracks mistakes without overreacting. Extra practice is triggered by repeated struggles, not isolated errors.
