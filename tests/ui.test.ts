@@ -1,6 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { flushReviewSessions, queueReviewSession, setReviewScope } from '../src/ui';
+import { flushReviewSessions, previousReviewInLesson, queueReviewSession, setReviewScope } from '../src/ui';
+import type { Review } from '../src/types';
+
+test('given a new lesson, when earlier answers remain in history, then the previous answer display starts clear', () => {
+  const review = (id: string, lessonId: string) => ({ attempt: { id, lessonId } }) as Review;
+  const old = review('old-answer', 'old-lesson');
+  const latest = review('latest-answer', 'current-lesson');
+  const earlier = review('earlier-answer', 'current-lesson');
+  assert.equal(previousReviewInLesson('new-lesson', [old], old.attempt.id), null);
+  assert.equal(previousReviewInLesson('current-lesson', [old, latest, earlier], old.attempt.id), latest);
+  assert.equal(previousReviewInLesson('current-lesson', [old, latest, earlier], earlier.attempt.id), earlier);
+  assert.equal(previousReviewInLesson(null, [old], old.attempt.id), null);
+});
 
 type Body = { sessionId: string; activeMs: number; closed: boolean };
 const storage = new Map<string, string>();

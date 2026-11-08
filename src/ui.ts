@@ -1,5 +1,12 @@
 import { useEffect, useRef } from 'react';
-import type { ReviewSession } from './types';
+import type { Review, ReviewSession } from './types';
+
+export function previousReviewInLesson(lessonId: string | null | undefined, reviews: Review[], preferredId: string | null): Review | null {
+  if (!lessonId) return null;
+  return reviews.find(item => item.attempt.lessonId === lessonId && item.attempt.id === preferredId)
+    ?? reviews.find(item => item.attempt.lessonId === lessonId)
+    ?? null;
+}
 
 export type ReviewWrite = { attemptId: string; sessionId: string; activeMs: number; closed: boolean; openedAt?: string; created?: boolean };
 const STORAGE_KEY = 'code-swipe-review-writes';

@@ -6,7 +6,7 @@ import javascript from 'highlight.js/lib/languages/javascript';
 import python from 'highlight.js/lib/languages/python';
 import rust from 'highlight.js/lib/languages/rust';
 import type { Answer, AppState, CurriculumPlan, Discussion, GuideConcept, ConceptGuide, GuideEvent, Hypothesis, Job, JsonValue, Language, LessonFeedback, LessonSummary, Metrics, ProviderId, Review, ReviewSession, Settings } from './types';
-import { flushReviewSessions, useAnswerClock, useReviewSync, useReviewTiming } from './ui';
+import { flushReviewSessions, previousReviewInLesson, useAnswerClock, useReviewSync, useReviewTiming } from './ui';
 import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from './lesson-sizes';
 import { rustCall, rustDisplay, rustResult } from './rust-display';
 import { contextLabel, guideContext, isLanguage } from './learning-contexts';
@@ -451,7 +451,7 @@ export default function App() {
   const pointer = useRef<{ x: number; y: number; id: number; horizontal: boolean } | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const review = state?.reviews.find((item) => item.attempt.id === reviewId) || null;
-  const lastReview = state?.reviews.find((item) => item.attempt.id === lastReviewId) || state?.reviews[0] || null;
+  const lastReview = previousReviewInLesson(state?.currentLesson?.id, state?.reviews ?? [], lastReviewId);
   const running = state?.job?.status === 'running';
   const discussing = running && state?.job?.kind === 'discussion';
   const chosenProvider = state?.providers.find((provider) => provider.id === state.settings.provider);
@@ -526,6 +526,7 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [answerFeedback?.id]);
   useEffect(() => { setAnswerFeedback(null); }, [view, reviewId]);
+  useEffect(() => { setAnswerFeedback(null); setLastReviewId(null); }, [state?.currentLesson?.id]);
   useEffect(() => { if (!reviewId) heading.current?.focus({ preventScroll: true }); }, [state?.question?.id, view]);
 
   const mutate = useCallback(async (name: string, operation: () => Promise<void>) => {
@@ -704,7 +705,7 @@ export default function App() {
         </div></div>}
     </main>
     <div className="answer-feedback-position" role="status" aria-live="polite" aria-atomic="true">
-      {answerFeedback && view === 'practice' && !review && <div key={answerFeedback.id} className={`answer-feedback ${resultTone(answerFeedback.correct)}`} data-testid="answer-feedback">
+      {answerFeedback && lastReview?.attempt.id === answerFeedback.id && view === 'practice' && !review && <div key={answerFeedback.id} className={`answer-feedback ${resultTone(answerFeedback.correct)}`} data-testid="answer-feedback">
         {answerFeedback.correct === null ? <HelpCircle size={28} /> : answerFeedback.correct ? <CheckCircle2 size={28} /> : <X size={28} />}
         <div><span>Previous answer</span><strong>{quickResultLabel(answerFeedback.correct)}</strong></div>
       </div>}
