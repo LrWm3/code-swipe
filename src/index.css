@@ -395,9 +395,10 @@ td { color: #b1bac4; }
 
 /* Learning directions and continuing curricula share the existing notebook style. */
 .learning-directions .page-intro { margin-bottom: 22px; }
-.direction-steering { margin-bottom: 18px; padding: 20px 24px; }
+.direction-steering { margin-top: 18px; padding: 20px 24px; }
 .direction-steering label { display: block; margin-bottom: 10px; font-size: .82rem; font-weight: 600; }
 .direction-steering .field-help { margin: 8px 0 0; }
+.direction-steering-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
 .direction-options { display: grid; gap: 16px; }
 .direction-option { padding: 24px; }
 .direction-option.recommended { border-color: #58a6ff80; background: linear-gradient(130deg, #58a6ff0b, transparent), var(--panel); }

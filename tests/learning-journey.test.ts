@@ -219,7 +219,8 @@ test('given direction previews and a curriculum, when rendered, then options, re
   const chooser = renderToStaticMarkup(createElement(DirectionChooser, { choices: journey.directions, pending: false, onChoose() {}, onPropose() {} }));
   assert.equal((chooser.match(/data-testid="choose-direction"/g) ?? []).length, 3);
   assert.match(chooser, /Choose for me/);
-  assert.match(chooser, /data-testid="direction-steering"/);
+  assert.match(chooser, /data-testid="suggest-different-directions"/);
+  assert.doesNotMatch(chooser, /data-testid="direction-steering"/);
   const outline = renderToStaticMarkup(createElement(CurriculumReady, { arc: activeArc(journey)!, pending: false, onStart() {} }));
   assert.match(outline, /Prepare first/);
   assert.match(outline, /When we’ll move on/);
