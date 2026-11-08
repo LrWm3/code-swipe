@@ -396,7 +396,7 @@ export interface PresentationRevision {
 export interface ProviderStatus { id: ProviderId; available: boolean; version: string; detail: string }
 export interface TutorContext {
   curriculumHistory?: { title: string; goal: string; completedAt?: string; laterChecks: string[]; summary?: string }[];
-  learningPlan?: { arcId: string; title: string; goal: string; outcomes: LearningOutcome[]; step: LearningStep; remaining: LearningStep[]; finishWhen: string; laterChecks: string[]; recentReview?: ArcReview };
+  learningPlan?: { arcId: string; title: string; goal: string; steering?: string; outcomes: LearningOutcome[]; step: LearningStep; remaining: LearningStep[]; finishWhen: string; laterChecks: string[]; recentReview?: ArcReview };
   knowledge?: KnowledgeGraph;
   environments?: ExecutionEnvironment[];
   settings: Settings;
@@ -526,6 +526,7 @@ export interface DirectionSet extends DirectionProposal {
   provider: ProviderId;
   model: string;
   selectedId?: string;
+  steering?: string;
 }
 export interface LearningOutcome { id: string; description: string; evidence: string }
 export interface LearningStep {
@@ -559,6 +560,7 @@ export interface LearningArc {
   createdAt: string;
   status: 'active' | 'complete' | 'legacy';
   direction: LearningDirection | null;
+  steering?: string;
   plan: LearningPlan;
   lessons: { lessonId: string; stepId: string; revision: number }[];
   revisions: { id: string; createdAt: string; afterLessonId: string; evidenceHash: string; review: ArcReview }[];
@@ -568,6 +570,7 @@ export interface LearningJourney {
   version: 1;
   activeArcId: string | null;
   directions: DirectionSet | null;
+  seenDirections?: Pick<LearningDirection, 'title' | 'goal' | 'contexts'>[];
   arcs: LearningArc[];
   cancelledLessonIds: string[];
   migratedAt: string;

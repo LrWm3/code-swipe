@@ -19,6 +19,10 @@ const directions: DirectionProposal = {
   options: ['hashing', 'networking', 'recursion'].map(id => ({ id, title: id, summary: `Explore ${id}.`, goal: `Understand ${id} in useful applications.`, why: 'A useful new explanatory idea.', novelty: 'Extends beyond repeated scans.', contexts: ['Python'], preview: { description: 'An accessible explanation.', example: 'A small concrete example.', explanation: 'How the example illustrates the idea.', links: [] } })),
   recommendedId: 'hashing', recommendation: 'Build on familiar dictionary use with a new explanation.',
 };
+const freshDirections: DirectionProposal = {
+  options: ['accessibility', 'databases', 'operating-systems'].map(id => ({ id, title: id, summary: `Explore ${id}.`, goal: `Understand ${id} in useful applications.`, why: 'A useful new explanatory idea.', novelty: 'Introduces a different area.', contexts: [id], preview: { description: 'An accessible explanation.', example: 'A small concrete example.', explanation: 'How the example illustrates the idea.', links: [] } })),
+  recommendedId: 'accessibility', recommendation: 'Explore an area not offered in the previous set.',
+};
 const plan: LearningPlan = { title: 'How hash tables work', goal: 'Understand keys and collisions.', outcomes: [{ id: 'collisions', description: 'Distinguish collisions from equal keys.', evidence: 'Judge varied examples independently.' }],
   lessons: [{ id: 'first', title: 'Keys and buckets', objective: 'Introduce buckets and collisions.', ideas: ['Hash buckets'], role: 'introduce', teaching: 'Offer a short guide and a worked example.', successEvidence: 'Apply the distinction to simple cases.' },
     { id: 'second', title: 'Handling collisions', objective: 'Apply collision handling.', ideas: ['Lookup'], role: 'apply', teaching: 'Fade example support.', successEvidence: 'Judge a different application.' }],
@@ -73,10 +77,11 @@ test('given a selected direction, when completing successive lessons, then the t
   const store = storeFor(t);
   const lessonContexts: TutorContext[] = [];
   let reviews = 0;
+  let directionRequests = 0;
   const service = new TutorService(store, providers, async context => { lessonContexts.push(structuredClone(context)); return createDemoLesson(context); }, undefined, undefined,
     async (task, context, _journey, options) => {
       assert.ok(options.sessionDirectory?.startsWith(store.directory));
-      return task.kind === 'directions' ? directions : task.kind === 'curriculum' ? plan : reviewFor(context, ++reviews === 2);
+      return task.kind === 'directions' ? ++directionRequests === 1 ? directions : freshDirections : task.kind === 'curriculum' ? plan : reviewFor(context, ++reviews === 2);
     });
   service.next(); await service.settled();
   assert.equal(service.state().learning!.directions!.options.length, 3);
@@ -103,8 +108,40 @@ test('given a selected direction, when completing successive lessons, then the t
   assert.equal(store.snapshot().learning!.arcs[0].status, 'complete');
   assert.equal(store.snapshot().learning!.arcs[0].revisions.length, 2);
   assert.equal(store.snapshot().learning!.directions!.options.length, 3);
+  assert.equal(store.snapshot().learning!.directions!.options[0].title, 'accessibility');
   assert.equal(service.state().currentLesson, null);
   assert.equal(service.state().reviews.length, first.questions.length + second.questions.length);
+});
+
+test('given repeated suggestions and a learner request, when regenerating and choosing, then the tutor avoids repeats and carries the request into lessons', async t => {
+  const store = storeFor(t);
+  const tasks: string[] = [];
+  const service = new TutorService(store, providers, undefined, undefined, undefined, async (task, context, journey) => {
+    tasks.push(task.kind);
+    if (task.kind === 'directions') {
+      const prompt = learningTaskPrompt(task, context, journey).prompt;
+      assert.match(prompt, /USER_REQUEST/);
+      assert.match(prompt, /DNS caching/);
+      if (tasks.length > 1) assert.match(prompt, /RECENTLY_SUGGESTED_DIRECTIONS[\s\S]*hashing/);
+      return tasks.length === 1 || tasks.length === 2 ? directions : freshDirections;
+    }
+    assert.equal(task.kind, 'curriculum');
+    assert.equal(task.steering, 'Focus on DNS caching and TTLs.');
+    return plan;
+  });
+  service.proposeDirections('DNS caching'); await service.settled();
+  assert.equal(store.snapshot().learning!.directions?.steering, 'DNS caching');
+  service.proposeDirections('DNS caching'); await service.settled();
+  assert.equal(service.job?.status, 'ready');
+  assert.deepEqual(tasks, ['directions', 'directions', 'directions']);
+  const saved = store.snapshot().learning!;
+  assert.equal(saved.seenDirections?.length, 6);
+  assert.equal(saved.directions?.options[0].title, 'accessibility');
+  assert.equal(new LocalStore(store.directory).snapshot().learning?.seenDirections?.length, 6);
+  service.chooseDirection(saved.directions!.id, 'accessibility', 'Focus on DNS caching and TTLs.'); await service.settled();
+  assert.equal(activeArc(store.snapshot().learning)?.steering, 'Focus on DNS caching and TTLs.');
+  assert.equal(store.context().learningPlan?.steering, 'Focus on DNS caching and TTLs.');
+  assert.match(renderToStaticMarkup(createElement(CurriculumReady, { arc: activeArc(store.snapshot().learning)!, pending: false, onStart() {} })), /Your emphasis: Focus on DNS caching and TTLs/);
 });
 
 test('given a cancelled direction request, when it returns after a replacement, then only the current choices are published', async t => {
@@ -156,6 +193,7 @@ test('given public curricula and baseline mode, when building prompts, then base
 
 test('given malformed plans or unsupported evidence, when validating, then choices, links and outcome claims cannot be fabricated', async t => {
   assert.throws(() => parseDirections(JSON.stringify({ ...directions, recommendedId: 'absent' })), /one of the three/);
+  assert.throws(() => parseDirections(JSON.stringify(directions), directions.options), /repeats one recently offered/);
   const bad = structuredClone(directions);
   bad.options[0].preview.links = [{ title: 'Unsafe', url: 'javascript:alert(1)' }];
   assert.throws(() => parseDirections(JSON.stringify(bad)), /documentation catalog/);
@@ -181,6 +219,7 @@ test('given direction previews and a curriculum, when rendered, then options, re
   const chooser = renderToStaticMarkup(createElement(DirectionChooser, { choices: journey.directions, pending: false, onChoose() {}, onPropose() {} }));
   assert.equal((chooser.match(/data-testid="choose-direction"/g) ?? []).length, 3);
   assert.match(chooser, /Choose for me/);
+  assert.match(chooser, /data-testid="direction-steering"/);
   const outline = renderToStaticMarkup(createElement(CurriculumReady, { arc: activeArc(journey)!, pending: false, onStart() {} }));
   assert.match(outline, /Prepare first/);
   assert.match(outline, /When we’ll move on/);

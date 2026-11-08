@@ -15,7 +15,7 @@ import { migrateKnowledge } from './knowledge-migration.ts';
 import { executionEnvironments } from './environments.ts';
 import { migrateOrganization } from './organization-migration.ts';
 import { knowledgeKind, teachingAnchor } from '../src/knowledge-organization.ts';
-import { activeArc, arcEvidenceHash, migrateLearning, parseDirections, parseLearningPlan, parseArcReview, remainingSteps } from './learning-journey.ts';
+import { activeArc, arcEvidenceHash, migrateLearning, parseDirections, parseLearningPlan, parseArcReview, recentDirections, remainingSteps } from './learning-journey.ts';
 import type { ArcReview, DirectionProposal, LearningPlan } from '../src/types.ts';
 
 export class AppError extends Error {
@@ -154,19 +154,21 @@ export class LocalStore {
 
   snapshot(): StoreData { return structuredClone(this.data); }
 
-  saveDirections(proposal: DirectionProposal): void {
+  saveDirections(proposal: DirectionProposal, steering = ''): void {
     if (this.pendingQuestion() || activeArc(this.data.learning)) throw new AppError('Finish the current curriculum before choosing another direction.', 409);
-    const checked = parseDirections(JSON.stringify(proposal));
-    this.update({ ...this.data, activeLessonId: null, learning: { ...this.data.learning!, directions: { ...checked, id: randomUUID(), createdAt: new Date().toISOString(), provider: this.data.settings.provider, model: this.data.settings.model } } });
+    const learning = this.data.learning!;
+    const checked = parseDirections(JSON.stringify(proposal), recentDirections(learning));
+    const directions = { ...checked, id: randomUUID(), createdAt: new Date().toISOString(), provider: this.data.settings.provider, model: this.data.settings.model, ...(steering ? { steering } : {}) };
+    this.update({ ...this.data, activeLessonId: null, learning: { ...learning, directions, seenDirections: recentDirections({ ...learning, directions }) } });
   }
 
-  beginCurriculum(directionSetId: string, directionId: string, plan: LearningPlan): void {
+  beginCurriculum(directionSetId: string, directionId: string, plan: LearningPlan, steering = ''): void {
     const learning = this.data.learning!;
     const directions = learning.directions;
     const direction = directions?.options.find(item => item.id === directionId);
     if (!directions || directions.id !== directionSetId || !direction || activeArc(learning) || this.pendingQuestion()) throw new AppError('These choices are no longer current. Refresh to continue.', 409);
     const checked = parseLearningPlan(JSON.stringify(plan));
-    const arc = { id: randomUUID(), createdAt: new Date().toISOString(), status: 'active' as const, direction, plan: checked, lessons: [], revisions: [] };
+    const arc = { id: randomUUID(), createdAt: new Date().toISOString(), status: 'active' as const, direction, ...(steering ? { steering } : {}), plan: checked, lessons: [], revisions: [] };
     this.update({ ...this.data, activeLessonId: null, learning: { ...learning, activeArcId: arc.id, directions: { ...directions, selectedId: directionId }, arcs: [...learning.arcs, arc] } });
   }
 
@@ -532,7 +534,7 @@ export class LocalStore {
     while (discussions.length > 1 && Buffer.byteLength(JSON.stringify(discussions)) > 48_000) discussions.shift();
     const arc = activeArc(this.data.learning);
     const remaining = arc ? remainingSteps(arc) : [];
-    const learningPlan = arc && remaining[0] ? { arcId: arc.id, title: arc.plan.title, goal: arc.plan.goal, outcomes: arc.plan.outcomes, step: remaining[0], remaining,
+    const learningPlan = arc && remaining[0] ? { arcId: arc.id, title: arc.plan.title, goal: arc.plan.goal, steering: arc.steering, outcomes: arc.plan.outcomes, step: remaining[0], remaining,
       finishWhen: arc.plan.finishWhen, laterChecks: arc.plan.laterChecks, recentReview: arc.revisions.at(-1)?.review } : undefined;
     return { settings: { ...this.data.settings }, knowledge: buildKnowledgeGraph(this.data), history: structuredClone(selected), ...(learningPlan ? { learningPlan: structuredClone(learningPlan) } : {}),
       curriculumHistory: this.data.learning?.arcs.filter(item => item.status === 'complete').slice(-12).map(item => ({ title: item.plan.title, goal: item.plan.goal, completedAt: item.completedAt, laterChecks: item.plan.laterChecks, summary: item.revisions.at(-1)?.review.summary })),

@@ -89,6 +89,7 @@ test('given malformed requests, when parsed, then errors remain JSON and no stat
   assert.equal(bad.status, 400);
   assert.ok((await bad.json()).error);
   assert.equal((await json('/api/settings', 'PUT', { provider: 'oops' })).status, 400);
+  assert.equal((await json('/api/learning/directions', 'POST', { steering: 42 })).status, 400);
   assert.equal((await json('/api/no-such-route')).status, 404);
   assert.equal((await json('/api/answers', 'POST', {})).status, 400);
 });

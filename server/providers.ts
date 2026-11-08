@@ -7,7 +7,7 @@ import type { ConceptGuide, GuideConcept, DiscussionContext, ProposedDiscussion,
 import { guidePrompt, guideSchema, parseGuide, contextGuidePrompt, contextGuideSchema, parseContextGuide, guideIsExecutable } from './concept-guides.ts';
 import { buildDiscussionPrompt, discussionOutputSchema, parseDiscussionOutput } from './discussion.ts';
 import { buildTutorPrompt, lessonSchemaForBatch, parseLessonOutput } from './prompts.ts';
-import { learningTaskPrompt, parseDirections, parseLearningPlan, parseArcReview, type LearningTask } from './learning-journey.ts';
+import { learningTaskPrompt, parseDirections, parseLearningPlan, parseArcReview, recentDirections, type LearningTask } from './learning-journey.ts';
 import type { LearningJourney, DirectionProposal, LearningPlan, ArcReview } from '../src/types.ts';
 
 type CliProvider = Exclude<ProviderId, 'demo'>;
@@ -333,7 +333,7 @@ export async function generateLearningTask(task: LearningTask, context: TutorCon
   if (context.repair?.length) request.prompt += `\nCORRECT THE PREVIOUS RESPONSE\n${JSON.stringify(context.repair)}`;
   const raw = await runStructuredTutor(context.settings, { ...request, subject: task.kind }, options);
   if (options.signal.aborted) throw abortError();
-  try { return task.kind === 'directions' ? parseDirections(raw) : task.kind === 'curriculum' ? parseLearningPlan(raw) : parseArcReview(raw, task.arc, context); }
+  try { return task.kind === 'directions' ? parseDirections(raw, recentDirections(journey)) : task.kind === 'curriculum' ? parseLearningPlan(raw) : parseArcReview(raw, task.arc, context); }
   catch (error) { throw new Error(`Invalid curriculum response: ${(error as Error).message}`); }
 }
 

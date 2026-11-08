@@ -7,6 +7,7 @@ export function CurriculumOutline({ arc }: { arc: LearningArc }) {
   const remaining = (latest?.remainingLessons ?? arc.plan.lessons).filter(step => !arc.lessons.some(link => link.stepId === step.id));
   return <div className="curriculum-outline">
     <p>{arc.plan.goal}</p>
+    {arc.steering && <p className="fine-print">Your emphasis: {arc.steering}</p>}
     <h3>What you’ll develop</h3><ul>{arc.plan.outcomes.map(outcome => <li key={outcome.id}>{outcome.description}</li>)}</ul>
     {latest && <div className="notice"><strong>{arc.status === 'complete' ? 'Curriculum complete' : 'Progress so far'}</strong><p>{latest.summary}</p></div>}
     {remaining.length > 0 && <><h3>{arc.lessons.length ? 'Remaining lessons' : 'Your lesson outline'}</h3><ol className="curriculum-steps">{remaining.map((step, index) => <li key={step.id}>
@@ -34,18 +35,22 @@ function DirectionPreview({ direction, recommended, pending, onChoose, onClose }
   </dialog>;
 }
 
-export function DirectionChooser({ choices, completed, pending, onChoose, onPropose }: { choices: DirectionSet | null; completed?: LearningArc; pending: boolean; onChoose: (id: string) => void; onPropose: () => void }) {
+export function DirectionChooser({ choices, completed, pending, onChoose, onPropose }: { choices: DirectionSet | null; completed?: LearningArc; pending: boolean; onChoose: (id: string, steering: string) => void; onPropose: (steering: string) => void }) {
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [steering, setSteering] = useState(choices?.steering ?? '');
+  useEffect(() => { setSteering(choices?.steering ?? ''); }, [choices?.id]);
   const preview = choices?.options.find(item => item.id === previewId);
+  const request = steering.trim();
   return <section className="learning-directions" data-testid="learning-directions">
     {completed && <details className="panel completed-curriculum"><summary><CheckCircle2 size={18} />Completed: {completed.plan.title}</summary><CurriculumOutline arc={completed} /></details>}
     <div className="page-intro"><div><div className="eyebrow">Your next curriculum</div><h1>Where shall we go next?</h1><p className="muted">Choose an idea to develop over a few short lessons. Preview any direction, or let your tutor choose.</p></div></div>
-    {!choices ? <section className="panel"><p>Your tutor will suggest three different areas, with one recommendation based on your learning so far.</p><button className="button primary" data-testid="propose-directions" disabled={pending} onClick={onPropose}><Sparkles size={17} />Explore new directions</button></section> : <>
+    <div className="panel direction-steering"><label htmlFor="direction-steering">Steer your tutor <span className="label-note">Optional</span></label><input id="direction-steering" data-testid="direction-steering" maxLength={500} value={steering} onChange={event => setSteering(event.target.value)} disabled={pending} placeholder="For example: I'd like to understand DNS, especially caching." /><p className="field-help">Use this to shape new suggestions or add emphasis to the direction you choose. Leave it blank to explore freely.</p></div>
+    {!choices ? <section className="panel"><p>Your tutor will suggest three different areas, with one recommendation based on your learning so far.</p><button className="button primary" data-testid="propose-directions" disabled={pending} onClick={() => onPropose(request)}><Sparkles size={17} />Explore new directions</button></section> : <>
       <div className="direction-options">{choices.options.map(option => <article className={`panel direction-option ${option.id === choices.recommendedId ? 'recommended' : ''}`} key={option.id}>
-        <div className="eyebrow">{option.id === choices.recommendedId ? <><Sparkles size={14} /> Recommended</> : 'Another direction'}</div><h2>{option.title}</h2><p>{option.summary}</p><p className="fine-print">{option.contexts.join(' · ')}</p><div className="direction-actions"><button className="button quiet" onClick={() => setPreviewId(option.id)} data-testid="preview-direction"><BookOpen size={16} />Explore<ChevronRight size={16} /></button><button className="button primary" disabled={pending} onClick={() => onChoose(option.id)} data-testid="choose-direction">Choose<ArrowRight size={16} /></button></div>
-      </article>)}</div><p className="recommendation-note">{choices.recommendation}</p><div className="direction-footer"><button className="button quiet" disabled={pending} onClick={() => onChoose(choices.recommendedId)} data-testid="choose-for-me"><Sparkles size={16} />Choose for me</button><button className="text-button" disabled={pending} onClick={onPropose}>Suggest different directions</button></div>
+        <div className="eyebrow">{option.id === choices.recommendedId ? <><Sparkles size={14} /> Recommended</> : 'Another direction'}</div><h2>{option.title}</h2><p>{option.summary}</p><p className="fine-print">{option.contexts.join(' · ')}</p><div className="direction-actions"><button className="button quiet" onClick={() => setPreviewId(option.id)} data-testid="preview-direction"><BookOpen size={16} />Explore<ChevronRight size={16} /></button><button className="button primary" disabled={pending} onClick={() => onChoose(option.id, request)} data-testid="choose-direction">Choose<ArrowRight size={16} /></button></div>
+      </article>)}</div><p className="recommendation-note">{choices.recommendation}</p><div className="direction-footer"><button className="button quiet" disabled={pending} onClick={() => onChoose(choices.recommendedId, request)} data-testid="choose-for-me"><Sparkles size={16} />Choose for me</button><button className="text-button" disabled={pending} onClick={() => onPropose(request)}>{request ? 'Suggest directions for this' : 'Suggest different directions'}</button></div>
     </>}
-    {preview && choices && <DirectionPreview direction={preview} recommended={preview.id === choices.recommendedId} pending={pending} onClose={() => setPreviewId(null)} onChoose={() => { setPreviewId(null); onChoose(preview.id); }} />}
+    {preview && choices && <DirectionPreview direction={preview} recommended={preview.id === choices.recommendedId} pending={pending} onClose={() => setPreviewId(null)} onChoose={() => { setPreviewId(null); onChoose(preview.id, request); }} />}
   </section>;
 }
 

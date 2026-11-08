@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { AppState, Job, Language, ProviderStatus, DirectionProposal, LearningPlan, ArcReview, TutorContext } from '../src/types.ts';
 import { AppError, LocalStore, parseSettings } from './store.ts';
 import { detectProviders, generateLesson, generateDiscussion, generateGuide, generateLearningTask } from './providers.ts';
-import { activeArc, arcEvidenceHash, type LearningTask } from './learning-journey.ts';
+import { activeArc, arcEvidenceHash, parseDirections, recentDirections, type LearningTask } from './learning-journey.ts';
 import { createDemoLesson } from './demo.ts';
 import { createPythonDemoLesson } from './python-demo.ts';
 import { createRustDemoLesson } from './rust-demo.ts';
@@ -74,7 +74,15 @@ export class TutorService {
   private async learningRequest(task: LearningTask, signal: AbortSignal, onProgress: (message: string) => void) {
     const context = this.learningContext();
     for (let attempt = 0; ; attempt++) {
-      try { return await this.planLearning(task, context, this.store.snapshot().learning!, { signal, onProgress, sessionDirectory: this.sessionDirectory() }); }
+      try {
+        const journey = this.store.snapshot().learning!;
+        const result = await this.planLearning(task, context, journey, { signal, onProgress, sessionDirectory: this.sessionDirectory() });
+        if (task.kind === 'directions') {
+          try { return parseDirections(JSON.stringify(result), recentDirections(journey)); }
+          catch (error) { throw new Error(`Invalid curriculum response: ${(error as Error).message}`); }
+        }
+        return result;
+      }
       catch (error) {
         if (signal.aborted || attempt >= 2 || !(error instanceof Error) || !error.message.startsWith('Invalid curriculum response:')) throw error;
         context.repair = [error.message];
@@ -83,22 +91,30 @@ export class TutorService {
     }
   }
 
-  proposeDirections() {
+  private directionRequest(value: unknown): string {
+    if (value === undefined || value === null) return '';
+    if (typeof value !== 'string' || value.trim().length > 500) throw new AppError('Keep your direction request under 500 characters.');
+    return value.trim();
+  }
+
+  proposeDirections(steering?: unknown) {
     if (activeArc(this.store.snapshot().learning)) throw new AppError('Finish the current curriculum before choosing another direction.', 409);
+    const request = this.directionRequest(steering);
     this.runLearning('directions', async (signal, active, progress) => {
-      const proposal = await this.learningRequest({ kind: 'directions' }, signal, progress) as DirectionProposal;
-      if (active()) this.store.saveDirections(proposal);
+      const proposal = await this.learningRequest({ kind: 'directions', steering: request }, signal, progress) as DirectionProposal;
+      if (active()) this.store.saveDirections(proposal, request);
     });
   }
 
-  chooseDirection(setId: string, directionId: string) {
+  chooseDirection(setId: string, directionId: string, steering?: unknown) {
     const learning = this.store.snapshot().learning!;
     const choices = learning.directions;
     const direction = choices?.options.find(item => item.id === directionId);
     if (!choices || choices.id !== setId || !direction || activeArc(learning)) throw new AppError('Choose one of the current learning directions.', 409);
+    const request = steering === undefined ? choices.steering ?? '' : this.directionRequest(steering);
     this.runLearning('curriculum', async (signal, active, progress) => {
-      const plan = await this.learningRequest({ kind: 'curriculum', direction }, signal, progress) as LearningPlan;
-      if (active()) this.store.beginCurriculum(setId, directionId, plan);
+      const plan = await this.learningRequest({ kind: 'curriculum', direction, steering: request }, signal, progress) as LearningPlan;
+      if (active()) this.store.beginCurriculum(setId, directionId, plan, request);
     });
   }
 

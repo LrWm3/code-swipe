@@ -661,11 +661,11 @@ export default function App() {
   const journeyEnabled = Boolean(state?.learning && state.settings.tutorMode === 'reflective' && state.settings.provider !== 'demo');
   const arc = state?.learning?.arcs.find(item => item.id === state.learning?.activeArcId && item.status === 'active');
   const completedArc = state?.learning?.arcs.filter(item => item.status === 'complete').at(-1);
-  const chooseDirection = (directionId: string) => void mutate('choose-direction', async () => {
+  const chooseDirection = (directionId: string, steering: string) => void mutate('choose-direction', async () => {
     if (!state?.learning?.directions) return;
-    acceptState(await api<AppState>('/api/learning/choose', 'POST', { setId: state.learning.directions.id, directionId }));
+    acceptState(await api<AppState>('/api/learning/choose', 'POST', { setId: state.learning.directions.id, directionId, steering }));
   });
-  const proposeDirections = () => void mutate('directions', async () => acceptState(await api<AppState>('/api/learning/directions', 'POST')));
+  const proposeDirections = (steering: string) => void mutate('directions', async () => acceptState(await api<AppState>('/api/learning/directions', 'POST', { steering })));
   const lesson = state?.currentLesson || null;
   const lessonNumber = lesson && state ? arc?.lessons.some(item => item.lessonId === lesson.id) ? arc.lessons.findIndex(item => item.lessonId === lesson.id) + 1 : state.lessons.length - state.lessons.findIndex(item => item.id === lesson.id) : 0;
   const changeView = (next: typeof view) => { setReviewId(null); setView(next); };
