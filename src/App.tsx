@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { createPortal } from 'react-dom';
 import { ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, Code2, Download, Flag, FlaskConical, HelpCircle, Layers3, LoaderCircle, Settings2, ShieldCheck, Sparkles, Terminal, X } from 'lucide-react';
 import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
@@ -73,13 +72,13 @@ function Badge({ children, tone = '' }: { children: React.ReactNode; tone?: stri
   return <span className={`badge ${tone}`}>{children}</span>;
 }
 
-function PreviousAnswer({ review, disabled, onReview }: { review: Review; disabled: boolean; onReview: () => void }) {
+function PreviousAnswer({ review, onReview }: { review: Review; onReview: () => void }) {
   return <div className="previous-answer" data-testid="previous-answer" aria-label="Previous answer">
-    <span className={`answer-result ${resultTone(review.attempt.correct)}`}>
+    <button className={`answer-result ${resultTone(review.attempt.correct)}`} onClick={onReview} title="Review previous answer" data-testid="review-result">
       {review.attempt.correct === null ? <HelpCircle size={18} /> : review.attempt.correct ? <CheckCircle2 size={18} /> : <X size={18} />}
       {quickResultLabel(review.attempt.correct)}
-    </span>
-    <button className="button compact quiet" onClick={onReview} disabled={disabled} data-testid="review-previous">Review previous<ChevronRight size={15} /></button>
+    </button>
+    <button className="button compact quiet" onClick={onReview} data-testid="review-previous">Review previous<ChevronRight size={15} /></button>
   </div>;
 }
 
@@ -280,31 +279,20 @@ function Notebook({ state, selectedId, onSelect, onReview, onPractice, onGuide, 
   </div>;
 }
 
-function ReviewDialog({ review, pending, error, onFlag, onGuide, onClose }: { review: Review; pending: boolean; error: string; onFlag: (review: Review) => void; onGuide: (concept: GuideConcept) => void; onClose: () => void }) {
-  const panel = useRef<HTMLDivElement>(null);
-  const closeButton = useRef<HTMLButtonElement>(null);
+function ReviewScreen({ review, pending, error, backLabel, onFlag, onGuide, onClose }: { review: Review; pending: boolean; error: string; backLabel: string; onFlag: (review: Review) => void; onGuide: (concept: GuideConcept) => void; onClose: () => void }) {
+  const title = useRef<HTMLHeadingElement>(null);
   useReviewTiming(review.attempt.id);
   useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    closeButton.current?.focus({ preventScroll: true });
-    return () => { document.body.style.overflow = previousOverflow; previousFocus?.focus({ preventScroll: true }); };
-  }, []);
-  return createPortal(<div className="review-overlay" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <div ref={panel} className="review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-title" data-testid="review-dialog" onKeyDown={(event) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
-      if (event.key !== 'Tab') return;
-      const focusable = [...(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], summary, [tabindex="0"]') ?? [])].filter(item => item.getClientRects().length > 0);
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    }}>
-      <div className="review-dialog-inner"><header className="review-dialog-header"><div><span className="eyebrow">Answer review</span><h2 id="review-title">{review.question.title}</h2></div><button ref={closeButton} className="icon-button" onClick={onClose} aria-label="Close review" data-testid="close-review"><X size={22} /></button></header><div className="review-dialog-body">{error && <div className="notice error" role="alert">{error}</div>}<ReviewPanel review={review} pending={pending} onFlag={onFlag} onGuide={onGuide} /></div><footer className="review-dialog-footer"><button className="button primary" onClick={onClose} data-testid="back-to-practice">Done reviewing<ArrowRight size={16} /></button></footer></div>
-    </div>
-  </div>, document.body);
+    window.scrollTo(0, 0);
+    title.current?.focus({ preventScroll: true });
+  }, [review.attempt.id]);
+  return <section className="review-page" aria-labelledby="review-title" data-testid="review-dialog">
+    <button className="text-button" onClick={onClose} data-testid="close-review">← Back to {backLabel}</button>
+    <article className="review-page-card"><header className="review-dialog-header"><div><span className="eyebrow">Answer review</span><h1 ref={title} id="review-title" tabIndex={-1}>{review.question.title}</h1></div></header>
+      <div className="review-dialog-body">{error && <div className="notice error" role="alert">{error}</div>}<ReviewPanel review={review} pending={pending} onFlag={onFlag} onGuide={onGuide} /></div>
+      <footer className="review-dialog-footer"><button className="button primary" onClick={onClose} data-testid="back-to-practice">Done reviewing<ArrowRight size={16} /></button></footer>
+    </article>
+  </section>;
 }
 
 function GuideDialog({ concept, language, guide, job, pending, error, canPractice, onClose, onDone, onReport, onPractice, onCancel, onRetry }: {
@@ -722,13 +710,16 @@ export default function App() {
   const lessonNumber = lesson && state ? arc?.lessons.some(item => item.lessonId === lesson.id) ? arc.lessons.findIndex(item => item.lessonId === lesson.id) + 1 : state.lessons.length - state.lessons.findIndex(item => item.id === lesson.id) : 0;
   const changeView = (next: typeof view) => { setReviewId(null); setView(next); };
   const answerDisabled = Boolean(pending) || Boolean(connectionError) || Boolean(reviewId) || Boolean(guideConcept) || Boolean(running);
-  const previousAnswer = lastReview && !running ? <PreviousAnswer review={lastReview} disabled={Boolean(pending)} onReview={() => setReviewId(lastReview.attempt.id)} /> : null;
+  const previousAnswer = lastReview && !running ? <PreviousAnswer review={lastReview} onReview={() => setReviewId(lastReview.attempt.id)} /> : null;
 
-  return <div className={`app-shell view-${view}${view === 'practice' && state?.question ? ' has-active-card' : ''}`}>
+  return <div className={`app-shell view-${view}${view === 'practice' && state?.question && !reviewId ? ' has-active-card' : ''}`}>
     <header className="app-header"><button className="brand" onClick={() => changeView('practice')} aria-label="Code Swipe home"><span className="brand-mark"><Code2 size={24} /></span><span>code<span className="brand-light">swipe</span></span></button><nav aria-label="Main navigation">{([{ id: 'practice', label: 'Practice', icon: Code2 }, { id: 'lessons', label: 'Lessons', icon: Layers3 }, { id: 'notebook', label: 'Notebook', icon: BookOpen }, { id: 'settings', label: 'Setup', icon: Settings2 }] as const).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => changeView(id)} className={view === id ? 'active' : ''} aria-current={view === id ? 'page' : undefined}><Icon size={17} /><span>{label}</span></button>)}</nav><span className="local-status"><span className={`status-dot ${connectionError ? 'offline' : ''}`} />{connectionError ? 'Disconnected' : pending ? 'Saving…' : state ? 'Saved locally' : 'Connecting…'}</span></header>
     <main id="main-content">
       {(error || connectionError) && <div className="error-notice" role="alert"><div><strong>{connectionError ? 'Local server disconnected' : 'Couldn’t finish that action'}</strong><p>{connectionError || error}</p></div><button className="button compact quiet" onClick={() => { setError(''); void refresh(); void flushReviewSessions(); }} disabled={Boolean(pending)}>Reconnect</button></div>}
       {!state ? <div className="panel loading-state"><Terminal size={34} /><h1>{connectionError ? 'Reconnect to continue' : 'Opening your notebook…'}</h1><p className="muted">{connectionError ? 'Start the Code Swipe server, then reconnect.' : 'Loading your saved lessons.'}</p><button className="button quiet" onClick={() => void refresh()}>Retry connection</button></div>
+        : reviewId ? review
+          ? <ReviewScreen key={review.attempt.id} review={review} pending={Boolean(pending) || running} error={error || connectionError} backLabel={view === 'notebook' ? 'notebook' : 'lesson'} onFlag={flag} onGuide={concept => openGuide(concept)} onClose={() => setReviewId(null)} />
+          : <section className="panel review-page"><h1>Review unavailable</h1><p>The saved answer could not be found. Reconnect to refresh your notebook.</p><button className="button quiet" onClick={() => { setReviewId(null); void refresh(); }}>Back to lesson</button></section>
         : view === 'settings' ? <SettingsPanel state={state} settings={settings} setSettings={setSettings} pending={Boolean(pending) || running} onSave={() => void mutate('settings', async () => acceptState(await api<AppState>('/api/settings', 'PUT', settings)))} />
         : view === 'notebook' ? <Notebook state={state} selectedId={selectedLessonId} onSelect={setSelectedLessonId} onReview={setReviewId} onPractice={() => changeView('practice')} onGuide={openGuide} pending={Boolean(pending) || running} onUndo={id => void mutate('undo-merge', async () => acceptState(await api<AppState>(`/api/knowledge/merges/${encodeURIComponent(id)}/undo`, 'POST')))} />
         : view === 'lessons' ? <LessonsHome state={state} pending={Boolean(pending) || Boolean(connectionError) || running} onResumeMain={() => state.currentLesson?.generalPractice ? returnFromGeneralPractice() : changeView('practice')} onResumePractice={startGeneralPractice} onNotebook={() => changeView('notebook')} />
@@ -764,7 +755,6 @@ export default function App() {
         <div><span>Previous answer</span><strong>{quickResultLabel(answerFeedback.correct)}</strong></div>
       </div>}
     </div>
-    {review && <ReviewDialog key={review.attempt.id} review={review} pending={Boolean(pending) || running} error={error || connectionError} onFlag={flag} onGuide={concept => openGuide(concept)} onClose={() => setReviewId(null)} />}
     {guideConcept && <GuideDialog key={guideToken} concept={guideConcept} language={guideLanguage} guide={guide} job={state?.job ?? null} pending={Boolean(pending)} error={error || connectionError} canPractice={Boolean(state?.currentLesson && !state.currentLesson.focus) && (state?.settings.provider !== 'demo' || ['demo-code-review', 'python-demo-code-review', 'rust-demo-code-review'].includes(guideConcept.id))} onClose={closeGuide} onDone={() => guideEvent('finished', true)} onReport={action => guideEvent(action)} onPractice={focusPractice} onCancel={() => void mutate('cancel', async () => acceptState(await api<AppState>('/api/cancel', 'POST')))} onRetry={() => void mutate('guide', async () => acceptState(await api<AppState>(`/api/concepts/${encodeURIComponent(guideConcept.id)}/guide`, 'POST', { contextId: guideContextId })))} />}
   </div>;
 }
