@@ -61,6 +61,8 @@ main { padding: 30px 0 44px; }
 .current-setup { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: .7rem; color: var(--muted); margin-top: 17px; }
 .welcome-panel > .fine-print { margin-top: 20px; }
 .lesson-progress { margin-bottom: 20px; }
+.general-practice-switch { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.general-practice-switch .text-button { font-size: .72rem; }
 .lesson-progress > div:first-child { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
 .lesson-progress .muted { font-size: .69rem; font-family: var(--mono); }
 .progress-track { background: #21262d; height: 4px; border-radius: 10px; margin-top: 11px; overflow: hidden; }

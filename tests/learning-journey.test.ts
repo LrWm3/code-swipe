@@ -144,6 +144,70 @@ test('given repeated suggestions and a learner request, when regenerating and ch
   assert.match(renderToStaticMarkup(createElement(CurriculumReady, { arc: activeArc(store.snapshot().learning)!, pending: false, onStart() {} })), /Your emphasis: Focus on DNS caching and TTLs/);
 });
 
+test('given an unfinished curriculum lesson, when taking general practice, then both sets of cards can be resumed independently', async t => {
+  const store = storeFor(t);
+  store.saveDirections(directions);
+  store.beginCurriculum(store.snapshot().learning!.directions!.id, 'hashing', plan);
+  const main = await addLesson(store, false);
+  for (const question of main.questions.slice(0, 2)) store.answer(question.id, question.verdict, 500);
+  const contexts: TutorContext[] = [];
+  const service = new TutorService(store, providers, async context => { contexts.push(structuredClone(context)); return createDemoLesson(context); });
+  service.startGeneralPractice(); await service.settled();
+  assert.equal(service.job?.status, 'ready', service.job?.message);
+  const practice = store.activeLesson()!;
+  assert.equal(practice.generalPractice, true);
+  assert.notEqual(practice.id, main.id);
+  assert.equal(store.snapshot().learning?.mainLessonId, main.id);
+  assert.equal(store.snapshot().learning?.practiceLessonId, practice.id);
+  assert.equal(activeArc(store.snapshot().learning)?.lessons.length, 1);
+  assert.equal(contexts[0].learningPlan, undefined);
+  assert.equal(contexts[0].generalPractice?.avoidQuestions.length, main.questions.length - 2);
+  assert.match(buildTutorPrompt(contexts[0]), /GENERAL PRACTICE/);
+  store.answer(practice.questions[0].id, practice.questions[0].verdict, 500);
+  service.returnFromGeneralPractice();
+  assert.equal(store.activeLesson()?.id, main.id);
+  assert.equal(store.pendingQuestion()?.id, main.questions[2].id);
+  service.startGeneralPractice();
+  assert.equal(store.activeLesson()?.id, practice.id);
+  assert.equal(store.pendingQuestion()?.id, practice.questions[1].id);
+  assert.equal(contexts.length, 1);
+  const reopened = new LocalStore(store.directory);
+  assert.equal(reopened.activeLesson()?.id, practice.id);
+  assert.equal(reopened.snapshot().learning?.mainLessonId, main.id);
+  assert.equal(reopened.snapshot().learning?.practiceLessonId, practice.id);
+  service.returnFromGeneralPractice();
+  assert.equal(store.context().history.some(item => item.lesson.id === practice.id && item.attempts.length === 1), true);
+});
+
+test('given direction choices without a curriculum lesson, when general practice ends, then the choices remain available', async t => {
+  const store = storeFor(t);
+  store.saveDirections(directions);
+  const choiceId = store.snapshot().learning!.directions!.id;
+  const service = new TutorService(store, providers, async context => createDemoLesson(context));
+  service.startGeneralPractice(); await service.settled();
+  assert.equal(service.job?.status, 'ready', service.job?.message);
+  const practice = store.activeLesson()!;
+  assert.equal(practice.generalPractice, true);
+  for (const question of practice.questions) store.answer(question.id, question.verdict, 500);
+  service.returnFromGeneralPractice();
+  assert.equal(store.activeLesson(), undefined);
+  assert.equal(store.snapshot().learning?.directions?.id, choiceId);
+  assert.equal(store.snapshot().learning?.practiceLessonId, practice.id);
+  assert.equal(store.publicState(providers, null).lessons.find(item => item.id === practice.id)?.generalPractice, true);
+});
+
+test('given untouched general practice, when restarting at directions, then its saved pointer is cleared', async t => {
+  const store = storeFor(t);
+  const service = new TutorService(store, providers, async context => createDemoLesson(context));
+  service.startGeneralPractice(); await service.settled();
+  const practiceId = store.activeLesson()!.id;
+  assert.equal(store.snapshot().learning?.practiceLessonId, practiceId);
+  store.restartAtDirections();
+  assert.equal(store.snapshot().learning?.practiceLessonId, null);
+  assert.equal(store.snapshot().lessons.some(item => item.id === practiceId), false);
+  assert.equal(new LocalStore(store.directory).activeLesson(), undefined);
+});
+
 test('given a cancelled direction request, when it returns after a replacement, then only the current choices are published', async t => {
   const store = storeFor(t);
   let resolve!: (value: DirectionProposal) => void;

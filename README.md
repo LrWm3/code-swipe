@@ -45,6 +45,7 @@ Restart the server after preparing an image. Setup shows whether each sandbox is
 Code swipe makes it easy to complete a few coding lessons and practice code review in short chunks of time.
 
 - **Personalized learning:** Suggests three learning paths, recommends one, and builds a flexible 2–6 lesson curriculum that adapts to your progress.
+- **General practice:** Generates a separate mix of familiar skills, useful combinations, and nearby new ideas. You can switch between an unfinished curriculum lesson and unfinished practice without losing either place.
 - **Smart diagnostics:** Tracks mistakes without overreacting. Extra practice is triggered by repeated struggles, not isolated errors.
 - **Intentional questions:** Plans 6–12 questions per lesson, each designed to teach, test, reinforce, or explore specific skills.
 - **Long-term understanding:** Tracks concept familiarity, uncertainty, prerequisites, and progress across lessons while avoiding unnecessary repetition.

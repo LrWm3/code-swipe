@@ -276,6 +276,7 @@ export interface Lesson extends Omit<ProposedLesson, 'questions'> {
   questions: Exercise[];
   predictionHash: string;
   focus?: { conceptId: string; contextId?: string; parentLessonId: string };
+  generalPractice?: boolean;
 }
 export interface GuideConcept { id: string; name: string; description: string; contextId?: string; kind?: KnowledgeKind; practiceNames?: string[] }
 export interface ConceptGuide {
@@ -411,6 +412,7 @@ export interface TutorContext {
   repair?: string[];
   draft?: ProposedLesson;
   focus?: { concept: GuideConcept; contextId?: string; parentLessonId: string; avoidQuestions?: ProposedQuestion[] };
+  generalPractice?: { avoidQuestions: Pick<ProposedQuestion, 'title' | 'specification'>[] };
   guideEvents?: GuideEvent[];
   focusHistory?: { lessonId: string; parentLessonId: string; conceptId: string; language?: Language; answered: number; total: number; endedEarly: boolean }[];
 }
@@ -421,7 +423,7 @@ export interface Job {
   stage: string;
   startedAt: string;
   message: string;
-  kind?: 'lesson' | 'discussion' | 'guide' | 'focus' | 'directions' | 'curriculum' | 'progress';
+  kind?: 'lesson' | 'practice' | 'discussion' | 'guide' | 'focus' | 'directions' | 'curriculum' | 'progress';
   lessonId?: string;
   conceptId?: string;
   language?: Language;
@@ -479,6 +481,7 @@ export interface LessonSummary {
   feedback?: LessonFeedback;
   curriculum?: CurriculumPlan;
   focus?: Lesson['focus'];
+  generalPractice?: boolean;
   endedEarly?: boolean;
 }
 export interface AppState {
@@ -569,6 +572,8 @@ export interface LearningArc {
 export interface LearningJourney {
   version: 1;
   activeArcId: string | null;
+  mainLessonId?: string | null;
+  practiceLessonId?: string | null;
   directions: DirectionSet | null;
   seenDirections?: Pick<LearningDirection, 'title' | 'goal' | 'contexts'>[];
   arcs: LearningArc[];

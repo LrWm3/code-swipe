@@ -94,6 +94,23 @@ test('given malformed requests, when parsed, then errors remain JSON and no stat
   assert.equal((await json('/api/answers', 'POST', {})).status, 400);
 });
 
+test('given unfinished general practice, when leaving and reopening it through the API, then its answer position is preserved', async t => {
+  const api = await isolatedAPI(t, async context => createDemoLesson(context));
+  api.store.saveSettings({ ...DEFAULT_SETTINGS, provider: 'codex' });
+  assert.equal((await api.request('/api/practice', {})).status, 202);
+  await api.tutor.settled();
+  assert.equal(api.tutor.job?.status, 'ready', api.tutor.job?.message);
+  const practice = api.store.activeLesson()!;
+  assert.equal(practice.generalPractice, true);
+  const first = practice.questions[0];
+  assert.equal((await api.request('/api/answers', { exerciseId: first.id, answer: first.verdict, elapsedMs: 500 })).status, 200);
+  assert.equal((await api.request('/api/practice/return', {})).status, 200);
+  assert.equal(api.store.activeLesson(), undefined);
+  assert.equal((await api.request('/api/practice', {})).status, 202);
+  assert.equal(api.store.activeLesson()?.id, practice.id);
+  assert.equal(api.store.pendingQuestion()?.id, practice.questions[1].id);
+});
+
 test('given demo setup, when a lesson is played through the API, then answers persist and predictions stay hidden until answered', async () => {
   assert.equal((await json('/api/settings', 'PUT', { provider: 'demo', model: '', interests: 'networks', batchSize: 6, tutorMode: 'reflective' })).status, 200);
   assert.equal((await json('/api/plan', 'POST', {})).status, 202);

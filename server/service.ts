@@ -121,6 +121,7 @@ export class TutorService {
   next() {
     this.requireIdle();
     if (this.store.activeLesson()?.focus) throw new AppError('Return from focused practice to your main lesson first.', 409);
+    if (this.store.activeLesson()?.generalPractice) throw new AppError('Return from general practice to your curriculum first.', 409);
     const data = this.store.snapshot();
     if (data.settings.provider === 'demo' || data.settings.tutorMode === 'baseline') return this.plan();
     if (this.store.pendingQuestion()) throw new AppError('Finish the current lesson first.', 409);
@@ -146,20 +147,47 @@ export class TutorService {
       }
     });
   }
-  plan(focusRequest?: { conceptId: string; length: number; language?: Language; contextId?: string }) {
+  startGeneralPractice() {
+    this.requireIdle();
+    const existing = this.store.generalPracticeLesson();
+    const answered = new Set(this.store.snapshot().attempts.map(item => item.exerciseId));
+    if (existing && existing.questions.some(question => !answered.has(question.id))) {
+      this.store.switchGeneralPractice('practice');
+      return;
+    }
+    this.plan(undefined, true);
+  }
+
+  returnFromGeneralPractice() {
+    this.requireIdle();
+    if (!this.store.activeLesson()?.generalPractice) throw new AppError('General practice is not active.', 409);
+    this.store.switchGeneralPractice('lesson');
+  }
+
+  plan(focusRequest?: { conceptId: string; length: number; language?: Language; contextId?: string }, generalPractice = false) {
     this.requireIdle();
     const parent = this.store.activeLesson();
+    if (generalPractice && (this.store.snapshot().settings.tutorMode !== 'reflective' || this.store.snapshot().settings.provider === 'demo')) throw new AppError('Choose a reflective Codex or OpenCode tutor for general practice.');
+    if (generalPractice && parent?.focus) throw new AppError('Return from focused practice first.', 409);
+    if (!focusRequest && !generalPractice && parent?.generalPractice) throw new AppError('Return from general practice first.', 409);
     const concept = focusRequest ? this.store.concept(focusRequest.conceptId) : null;
     if (focusRequest && (!concept || concept.kind === 'topic' || !parent || parent.focus || ![4, 6].includes(focusRequest.length) || (focusRequest.language !== undefined && !['javascript', 'python', 'rust'].includes(focusRequest.language)))) throw new AppError('Choose a teachable concept, technique, skill, or representation and 4 or 6 cards while a main lesson is open.', 400);
     if (focusRequest && this.store.snapshot().settings.provider === 'demo' && !['demo-code-review', 'python-demo-code-review', 'rust-demo-code-review'].includes(concept?.id ?? '')) throw new AppError('Choose Codex or OpenCode in Setup to generate focused practice for this concept.');
-    if (!focusRequest && this.store.pendingQuestion()) throw new AppError('Finish the current lesson before planning another.', 409);
+    if (!focusRequest && !generalPractice && this.store.pendingQuestion()) throw new AppError('Finish the current lesson before planning another.', 409);
     let context = this.store.context();
     if (!this.providers.some(item => item.id === context.settings.provider && item.available)) {
       throw new AppError(`${context.settings.provider} is unavailable. Install its CLI and restart, or choose practice demo.`, 503);
     }
-    if (!focusRequest) this.store.skipUnansweredDiscussions();
+    if (!focusRequest && !generalPractice) this.store.skipUnansweredDiscussions();
     context = this.store.context();
     context.environments = executionEnvironments(this.languages);
+    if (generalPractice) {
+      delete context.learningPlan;
+      const data = this.store.snapshot();
+      const main = data.lessons.find(item => item.id === data.learning?.mainLessonId) ?? (parent?.generalPractice ? undefined : parent);
+      const answered = new Set(data.attempts.filter(item => item.lessonId === main?.id).map(item => item.exerciseId));
+      context.generalPractice = { avoidQuestions: main?.questions.filter(item => !answered.has(item.id)).map(item => ({ title: item.title, specification: item.specification })) ?? [] };
+    }
     if (focusRequest && concept && parent) {
       delete context.learningPlan;
       const contextId = focusRequest.contextId ?? focusRequest.language ?? parent.contextIds?.[0] ?? parent.language ?? 'javascript';
@@ -174,7 +202,7 @@ export class TutorService {
     if (context.settings.provider === 'demo' && !runtime?.available) throw new AppError(runtime?.detail ?? `The ${language} sandbox is unavailable.`, 503);
     this.controller = new AbortController();
     const controller = this.controller;
-    const job: Job = { id: randomUUID(), kind: focusRequest ? 'focus' : 'lesson', ...(concept ? { conceptId: concept.id, language, contextId: context.focus?.contextId ?? language } : {}), status: 'running', stage: 'planning', startedAt: new Date().toISOString(), message: 'Preparing the lesson…' };
+    const job: Job = { id: randomUUID(), kind: focusRequest ? 'focus' : generalPractice ? 'practice' : 'lesson', ...(concept ? { conceptId: concept.id, language, contextId: context.focus?.contextId ?? language } : {}), status: 'running', stage: 'planning', startedAt: new Date().toISOString(), message: generalPractice ? 'Preparing general practice…' : 'Preparing the lesson…' };
     this.job = job;
     this.store.recordJob(job);
     const active = () => !controller.signal.aborted && this.job?.id === job.id && job.status === 'running';
@@ -205,7 +233,7 @@ export class TutorService {
             continue;
           }
           if (!active()) return;
-          this.store.commitLesson(validated, context.settings, context.focus ? { conceptId: context.focus.concept.id, contextId: context.focus.contextId, parentLessonId: context.focus.parentLessonId } : undefined);
+          this.store.commitLesson(validated, context.settings, context.focus ? { conceptId: context.focus.concept.id, contextId: context.focus.contextId, parentLessonId: context.focus.parentLessonId } : undefined, generalPractice);
           Object.assign(job, { status: 'ready', stage: 'ready', message: 'Lesson prepared. Predictions committed. Ready to play.' });
           this.store.recordJob(job);
           return;
