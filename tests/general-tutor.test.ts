@@ -27,7 +27,7 @@ export function generalLesson(context = tutorContext(), mixed = true): ProposedL
   lesson.curriculum!.conceptUpdates = [];
   lesson.questions.forEach((question, index) => {
     const answer = mixed && index >= 3;
-    Object.assign(question, { kind: answer ? 'answer-review' : 'code-review', contextId: answer ? 'numpy' : 'javascript', proposedAnswer: '', referenceAnswer: '', verification: { mode: answer ? 'unverified' : 'execute', environmentId: answer ? null : 'javascript', reason: answer ? 'NumPy has no execution environment.' : 'Pure JavaScript functions fit this environment.' } });
+    Object.assign(question, { kind: answer ? 'answer-review' : 'code-review', contextId: answer ? 'numpy' : 'javascript', source: answer ? `NumPy shape example ${index - 2}` : '', questionText: answer ? 'Is this proposed answer correct?' : 'Does this implementation match the description?', proposedAnswer: '', referenceAnswer: '', verification: { mode: answer ? 'unverified' : 'execute', environmentId: answer ? null : 'javascript', reason: answer ? 'NumPy has no execution environment.' : 'Pure JavaScript functions fit this environment.' } });
     if (answer) {
       const examples = [
         ['Broadcast compatible shapes', 'An array has shape (3, 1), and another has shape (1, 4). Can their elementwise sum have shape (3, 4)?', 'Yes. Each length-one dimension can expand to match the other array.', true],
@@ -63,6 +63,8 @@ test('given a mixed-context lesson, when validating and answering, then executio
   for (const question of lesson.questions) {
     const state = store.publicState([], null);
     assert.equal(state.question?.contextId, question.contextId);
+    assert.equal(state.question?.questionText, question.questionText);
+    assert.equal(state.question?.source, question.source);
     assert.equal('referenceAnswer' in state.question!, false);
     assert.equal('verification' in state.question!, false);
     assert.equal(store.answer(question.id, question.verdict, 2000).attempt.correct, true);
@@ -77,6 +79,19 @@ test('given a mixed-context lesson, when validating and answering, then executio
   assert.equal(buildCurriculumMemory(store.snapshot()).concepts[0].contextPractice!.numpy.supporting, 2);
   assert.equal(store.publicState([], null).metrics.count, 5);
   assert.equal(readFileSync(join(directory, 'plans', `${lesson.id}.json`), 'utf8'), planBytes);
+});
+
+test('given a generated contextual card, when its question or source is missing, then it cannot be published', async () => {
+  const context = tutorContext();
+  const missingQuestion = generalLesson(context);
+  missingQuestion.questions[0].questionText = '';
+  await assert.rejects(validateLesson(missingQuestion, context), /questionText/);
+  const missingSource = generalLesson(context);
+  missingSource.questions[3].source = '';
+  await assert.rejects(validateLesson(missingSource, context), /source/);
+  const duplicatedSource = generalLesson(context);
+  duplicatedSource.questions[0].source = duplicatedSource.questions[0].code;
+  await assert.rejects(validateLesson(duplicatedSource, context), /code-review uses code as its source/);
 });
 
 test('given no preferred contexts and an old Rust demo language, when preparing a contextual lesson, then its actual context determines its language', async t => {

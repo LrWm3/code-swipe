@@ -10,6 +10,7 @@ import { flushReviewSessions, previousReviewInLesson, useAnswerClock, useReviewS
 import { DEFAULT_LESSON_SIZE, LESSON_SIZES } from './lesson-sizes';
 import { rustCall, rustDisplay, rustResult } from './rust-display';
 import { contextLabel, guideContext, isLanguage } from './learning-contexts';
+import { cardPresentation } from './card-presentation';
 import { KnowledgePanel } from './KnowledgePanel';
 import { KIND_LABELS } from './knowledge-organization';
 import { CurriculumHistory, CurriculumReady, DirectionChooser, LegacyLearning } from './LearningJourney';
@@ -62,9 +63,9 @@ async function api<T>(path: string, method = 'GET', body?: unknown, signal?: Abo
   }
 }
 
-function Code({ code, language = 'javascript' }: { code: string; language?: Language | null }) {
+function Code({ code, language = 'javascript', label }: { code: string; language?: Language | null; label?: string }) {
   const highlighted = useMemo(() => language && hljs.getLanguage(language) ? hljs.highlight(code, { language }).value : null, [code, language]);
-  return <pre className="code-block" tabIndex={0} aria-label={language ? `${LANGUAGE_NAMES[language]} source` : 'Proposed answer'}>{highlighted === null ? <code>{code}</code> : <code dangerouslySetInnerHTML={{ __html: highlighted }} />}</pre>;
+  return <pre className="code-block" tabIndex={0} aria-label={label ?? (language ? `${LANGUAGE_NAMES[language]} source` : 'Proposed answer')}>{highlighted === null ? <code>{code}</code> : <code dangerouslySetInnerHTML={{ __html: highlighted }} />}</pre>;
 }
 
 function Badge({ children, tone = '' }: { children: React.ReactNode; tone?: string }) {
@@ -105,6 +106,7 @@ function Accountability({ metrics, settings }: { metrics: Metrics; settings: Set
 
 function ReviewPanel({ review, pending, onFlag, onGuide }: { review: Review; pending: boolean; onFlag: (review: Review) => void; onGuide: (concept: GuideConcept) => void }) {
   const { question, attempt } = review;
+  const card = cardPresentation(question);
   const isAnswer = question.kind === 'answer-review';
   const verdict = isAnswer && question.verdict === 'buggy' ? 'incorrect' : question.verdict;
   const checks = question.tests.map((test, index) => ({
@@ -147,7 +149,7 @@ function ReviewPanel({ review, pending, onFlag, onGuide }: { review: Review; pen
         <details className="plain-details"><summary>Original reference implementation</summary><Code code={review.originalPresentation.referenceCode} /></details>
       </details>
     </div>}
-    <details className="plain-details code-details"><summary>Revisit this {isAnswer ? 'answer' : 'code'} and specification</summary><p>{question.specification}</p><Code code={isAnswer ? question.proposedAnswer! : question.code} language={isAnswer ? null : review.language} /></details>
+    <details className="plain-details code-details"><summary>Revisit the description, source, and question</summary><p>{card.description}</p>{card.support && <p>Initial diagram:<br /><span className="preserve-lines">{card.support}</span></p>}{card.source && <Code code={card.source} language={card.sourceLanguage} label="Source" />}<p><strong>Question:</strong> {card.question}</p>{card.claim && <blockquote>{card.claim}</blockquote>}</details>
     <details className="plain-details code-details"><summary>{isAnswer ? 'Reference answer' : 'Reference implementation'}</summary><Code code={isAnswer ? question.referenceAnswer! : question.referenceCode} language={isAnswer ? null : review.language} /></details>
     <div className="prediction-box">
       <div className="eyebrow"><ShieldCheck size={15} /> Committed before your answer</div>
@@ -682,6 +684,7 @@ export default function App() {
   });
   const proposeDirections = (steering: string) => void mutate('directions', async () => acceptState(await api<AppState>('/api/learning/directions', 'POST', { steering })));
   const lesson = state?.currentLesson || null;
+  const card = state?.question ? cardPresentation(state.question, state.contexts) : null;
   const generalPractice = state?.lessons.find(item => item.id === state.learning?.practiceLessonId && item.generalPractice);
   const resumableGeneralPractice = Boolean(generalPractice && !generalPractice.complete);
   const canStartGeneralPractice = Boolean(journeyEnabled && chosenProvider?.available);
@@ -702,9 +705,11 @@ export default function App() {
           {state.lessonPreview?.length && lesson && !running ? <section className="panel lesson-preview" data-testid="lesson-preview"><div className="eyebrow">Before you begin · optional</div><h1>Ideas for this lesson</h1><p className="muted">Explore the concepts, techniques, and representations behind this lesson. Open a guide, try focused practice, or start right away.</p><div className="preview-concepts">{state.lessonPreview.map(concept => <button className="button quiet" key={`${concept.id}:${concept.contextId}`} onClick={() => openGuide(concept)} data-testid="preview-concept"><BookOpen size={17} /><span>{concept.name}{concept.kind && <small className="preview-kind">{KIND_LABELS[concept.kind]}</small>}</span><ChevronRight size={15} /></button>)}</div><button className="button primary" data-testid="begin-prepared-lesson" disabled={Boolean(pending)} onClick={() => void mutate('begin', async () => acceptState(await api<AppState>(`/api/lessons/${encodeURIComponent(lesson.id)}/start`, 'POST')))}>Start lesson<ArrowRight size={17} /></button></section>
           : state.question && lesson && !running ? <>
             <div className="lesson-progress"><div><span className="eyebrow">{lesson.focus ? 'Focused practice' : lesson.generalPractice ? 'General practice' : `Lesson ${lessonNumber}`}</span><span className="muted">Card {lesson.answered + 1} of {lesson.total}</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.answered} data-testid="lesson-progress"><span style={{ width: `${lesson.answered / lesson.total * 100}%` }} /></div>{lesson.focus && <button className="text-button focus-exit" disabled={Boolean(pending)} onClick={() => void mutate('resume', async () => acceptState(await api<AppState>('/api/lessons/resume', 'POST')))}>Leave practice and return to lesson<ChevronRight size={14} /></button>}</div>
-            <div className="card-stack"><div className="card-stack-back" aria-hidden="true" /><article className={`exercise-card ${dragging ? 'dragging' : ''}`} data-testid="exercise-card" data-question-id={state.question.id} style={{ transform: `translateX(${drag}px) rotate(${drag * .055}deg)` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} aria-busy={pending === 'answer'}>
+            <div className="card-stack"><div className="card-stack-back" aria-hidden="true" /><article className={`exercise-card structured-card ${dragging ? 'dragging' : ''}`} data-testid="exercise-card" data-question-id={state.question.id} style={{ transform: `translateX(${drag}px) rotate(${drag * .055}deg)` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} aria-busy={pending === 'answer'}>
               {drag > 25 && <div className="swipe-stamp correct" data-testid="swipe-correct-overlay">CORRECT</div>}{drag < -25 && <div className="swipe-stamp buggy" data-testid="swipe-buggy-overlay">{state.question.kind === 'answer-review' ? 'INCORRECT' : 'BUGGY'}</div>}
-              <div className="exercise-intro"><div className="section-heading"><span className="small-label">Target objective</span><Badge>{state.question.contextName ?? LANGUAGE_NAMES[state.question.language ?? 'javascript']}</Badge></div><h1 ref={heading} tabIndex={-1}>{state.question.title}</h1><div className="specification"><p>{state.question.specification}</p></div></div><Code code={state.question.kind === 'answer-review' ? state.question.proposedAnswer! : state.question.code} language={state.question.kind === 'answer-review' ? null : state.question.language} /><div className="card-footnote"><span>↔ Drag to decide</span><span>{state.question.kind === 'answer-review' ? 'Incorrect' : 'Buggy'} ← → Correct</span></div>
+              <div className="exercise-intro"><div className="section-heading"><span className="small-label">Description</span><Badge>{state.question.contextName ?? LANGUAGE_NAMES[state.question.language ?? 'javascript']}</Badge></div><h1 ref={heading} tabIndex={-1}>{state.question.title}</h1><div className="specification"><p>{card!.description}</p></div>{card!.support && <details className="card-support"><summary>Initial diagram</summary><pre>{card!.support}</pre></details>}</div>
+              {card!.source && <><div className="card-part-label">Source</div><Code code={card!.source} language={card!.sourceLanguage} label="Source" /></>}
+              <div className="card-question"><span className="small-label">Question</span><p>{card!.question}</p>{card!.claim && <blockquote>{card!.claim}</blockquote>}</div><div className="card-footnote"><span>↔ Drag to decide</span><span>{state.question.kind === 'answer-review' ? 'Incorrect' : 'Buggy'} ← → Correct</span></div>
             </article></div>
             {previousAnswer}
             <div className="answer-buttons"><button className="answer-button buggy" onClick={() => void submit('buggy')} disabled={answerDisabled} data-testid="answer-buggy"><X size={20} /><span>{state.question.kind === 'answer-review' ? 'Incorrect' : 'Buggy'}</span><kbd>←</kbd></button><button className="answer-button unsure" onClick={() => void submit('idk')} disabled={answerDisabled} data-testid="answer-idk" title="I don’t know · ungraded"><span>IDK</span><kbd>↓</kbd></button><button className="answer-button correct" onClick={() => void submit('correct')} disabled={answerDisabled} data-testid="answer-correct"><Check size={20} /><span>Correct</span><kbd>→</kbd></button></div>

@@ -623,7 +623,7 @@ export class LocalStore {
       contexts: graph.contexts, environments: executionEnvironments(languages), knowledge: buildKnowledgeGraph(publicData), conceptMemory: buildCurriculumMemory(publicData).concepts,
       currentLesson: summaries.find(item => item.id === this.activeLesson()?.id) ?? null,
       lessonPreview: this.previewConcepts(), guides: (this.data.guides ?? []).map(item => ({ ...item, conceptId: canonicalId(item.conceptId, graph.aliases) })),
-      question: current ? { id: current.id, title: current.title, specification: current.specification, code: current.code, language: questionLanguage(current, this.activeLesson()), ...(current.contextId ? { kind: current.kind, contextId: current.contextId, contextName: graph.contexts.find(item => item.id === current.contextId)?.name, ...(current.kind === 'answer-review' ? { proposedAnswer: current.proposedAnswer } : {}) } : {}),
+      question: current ? { id: current.id, title: current.title, specification: current.specification, code: current.code, language: questionLanguage(current, this.activeLesson()), ...(current.source !== undefined ? { source: current.source } : {}), ...(current.questionText !== undefined ? { questionText: current.questionText } : {}), ...(current.contextId ? { kind: current.kind, contextId: current.contextId, contextName: graph.contexts.find(item => item.id === current.contextId)?.name, ...(current.kind === 'answer-review' ? { proposedAnswer: current.proposedAnswer } : {}) } : {}),
         purpose: current.purpose, testCount: current.validation.testCount } : null,
       lessons: [...summaries].reverse(), reviews: [...this.data.attempts].reverse().map(item => this.review(item)),
       hypotheses: summaries.filter(item => item.complete).at(-1)?.hypotheses ?? [],

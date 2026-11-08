@@ -91,6 +91,7 @@ export const contextualLessonOutputSchema = object({ ...lessonOutputSchema.prope
     signature: { type: ['object', 'null'], properties: { name: text(80), parameters: list(text(80), 6, 1) }, required: ['name', 'parameters'], additionalProperties: false },
     code: { type: 'string', maxLength: 6000 }, referenceCode: { type: 'string', maxLength: 6000 },
     proposedAnswer: { type: 'string', maxLength: 6000 }, referenceAnswer: { type: 'string', maxLength: 6000 },
+    source: { type: 'string', maxLength: 6000 }, questionText: text(700),
     verification: object({ mode: choice(['execute', 'unverified']), environmentId: { type: ['string', 'null'], enum: ['javascript', 'python', 'rust', null] }, reason: text(700) }),
     plan: contextualQuestionPlanSchema,
     tests: list(lessonOutputSchema.properties!.questions.items!.properties!.tests.items!, 12),

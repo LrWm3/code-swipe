@@ -227,6 +227,10 @@ export interface ProposedQuestion {
   verification?: { mode: 'execute' | 'unverified'; environmentId: Language | null; reason: string };
   proposedAnswer?: string;
   referenceAnswer?: string;
+  // The source is separate from the task and proposed answer on answer-review cards.
+  // Code-review cards use code as their source. Older sealed cards omit both fields.
+  source?: string;
+  questionText?: string;
   // New questions use positional argument tuples in tests[].input.
   // Sealed legacy questions omit this and still call solve(input).
   signature?: FunctionSignature;
@@ -441,6 +445,8 @@ export interface PublicQuestion {
   contextId?: string;
   contextName?: string;
   proposedAnswer?: string;
+  source?: string;
+  questionText?: string;
   language?: Language;
   id: string;
   title: string;

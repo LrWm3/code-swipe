@@ -48,6 +48,7 @@ Code swipe makes it easy to complete a few coding lessons and practice code revi
 - **General practice:** Generates a separate mix of familiar skills, useful combinations, and nearby new ideas. You can switch between an unfinished curriculum lesson and unfinished practice without losing either place.
 - **Smart diagnostics:** Tracks mistakes without overreacting. Extra practice is triggered by repeated struggles, not isolated errors.
 - **Intentional questions:** Plans 6–12 questions per lesson, each designed to teach, test, reinforce, or explore specific skills.
+- **Clear cards:** Shows the task, the source to inspect, and the exact question separately; code review usually asks whether the implementation matches the task.
 - **Long-term understanding:** Tracks concept familiarity, uncertainty, prerequisites, and progress across lessons while avoiding unnecessary repetition.
 - **Skill-aware grading:** Distinguishes independent mastery from assisted success and recognizes skills practiced within harder problems.
 - **Verified challenges:** Tests coding questions and solutions in isolated sandboxes for JavaScript, Python, and Rust, repairing or rejecting invalid batches.

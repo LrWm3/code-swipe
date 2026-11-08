@@ -152,15 +152,18 @@ function structure(proposal: unknown, context: TutorContext): ProposedLesson {
   const unique = { title: new Set<string>(), code: new Set<string>() };
   for (let i = 0; i < questions.length; i++) {
     const path = `questions[${i}]`;
-    const question = object(questions[i], path, ['title', 'specification', 'code', 'referenceCode', 'verdict', 'explanation', 'tests', 'purpose', 'hypothesisId', 'ifCorrect', 'ifIncorrect', 'prediction', 'plan', ...((questions[i] as Record<string, unknown>)?.signature !== undefined ? ['signature'] : []), ...(contextual ? ['kind', 'contextId', 'verification', 'proposedAnswer', 'referenceAnswer', ...((questions[i] as ProposedLesson['questions'][number]).language !== undefined ? ['language'] : [])] : [])]);
+    const question = object(questions[i], path, ['title', 'specification', 'code', 'referenceCode', 'verdict', 'explanation', 'tests', 'purpose', 'hypothesisId', 'ifCorrect', 'ifIncorrect', 'prediction', 'plan', ...((questions[i] as Record<string, unknown>)?.signature !== undefined ? ['signature'] : []), ...(contextual ? ['kind', 'contextId', 'verification', 'proposedAnswer', 'referenceAnswer', 'source', 'questionText', ...((questions[i] as ProposedLesson['questions'][number]).language !== undefined ? ['language'] : [])] : [])]);
     const language = contextual ? question.language : context.settings.language;
     const executed = !contextual || (question.verification as ProposedLesson['questions'][number]['verification'])?.mode === 'execute';
     string(question.title, `${path}.title`, 140);
     string(question.specification, `${path}.specification`, 2_000);
+    if (contextual) string(question.questionText, `${path}.questionText`, 700);
     if (question.kind === 'answer-review') {
+      if (contextual) string(question.source, `${path}.source`, 6_000);
       string(question.proposedAnswer, `${path}.proposedAnswer`, 6_000);
       string(question.referenceAnswer, `${path}.referenceAnswer`, 6_000);
     } else {
+      if (contextual && question.source !== '') reject(`${path}.source`, 'code-review uses code as its source; leave source empty.');
       string(question.code, `${path}.code`, 6_000);
       string(question.referenceCode, `${path}.referenceCode`, 6_000);
     }

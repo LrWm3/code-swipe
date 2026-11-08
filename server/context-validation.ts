@@ -36,10 +36,10 @@ export function validateContextualQuestions(lesson: ProposedLesson, context: Tut
     const verification = question.verification;
     if (!verification || !['execute', 'unverified'].includes(verification.mode) || !verification.reason?.trim()) throw new Error(`${at} needs an explicit verification decision and reason.`);
     if (question.kind === 'answer-review') {
-      if (!question.proposedAnswer?.trim() || !question.referenceAnswer?.trim() || question.code !== '' || question.referenceCode !== '' || question.signature || question.language) throw new Error(`${at} answer-review needs proposed/reference answers, empty code, and no function signature or language.`);
+      if (!question.proposedAnswer?.trim() || !question.referenceAnswer?.trim() || !question.source?.trim() || question.code !== '' || question.referenceCode !== '' || question.signature || question.language) throw new Error(`${at} answer-review needs a separate source and proposed/reference answers, empty code, and no function signature or language.`);
       if (verification.mode !== 'unverified') throw new Error(`${at} answer-review content has no executable validator.`);
     } else {
-      if (!question.code.trim() || !question.referenceCode.trim() || question.proposedAnswer || question.referenceAnswer) throw new Error(`${at} code-review needs candidate/reference code and empty answer text.`);
+      if (!question.code.trim() || !question.referenceCode.trim() || question.source || question.proposedAnswer || question.referenceAnswer) throw new Error(`${at} code-review needs candidate/reference code and empty answer and source text.`);
     }
     const supported = question.kind === 'code-review' && environments.some(item => item.contextIds.includes(question.contextId!) && item.id === question.language);
     if (verification.mode === 'execute') {
