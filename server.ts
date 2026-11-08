@@ -7,12 +7,15 @@ import { TutorService } from './server/service.ts';
 
 dotenv.config({ quiet: true });
 
-export function createApp(service: TutorService) {
+export function createApp(service: TutorService, tailnetIp?: string) {
   const app = express();
   app.disable('x-powered-by');
   app.use((req, res, next) => {
     // Loopback binding alone does not stop a website from calling a local CLI.
-    const allowed = new Set([`127.0.0.1:${req.socket.localPort}`, `localhost:${req.socket.localPort}`]);
+    const localAddress = req.socket.localAddress;
+    const allowed = new Set(localAddress === '127.0.0.1'
+      ? [`127.0.0.1:${req.socket.localPort}`, `localhost:${req.socket.localPort}`]
+      : localAddress === tailnetIp ? [`${tailnetIp}:${req.socket.localPort}`] : []);
     const host = req.get('host') ?? '';
     if (!allowed.has(host)) return res.status(403).json({ error: 'Use the local URL printed by Code Swipe.' });
     if (req.get('sec-fetch-site') === 'cross-site' || (req.get('origin') && req.get('origin') !== `http://${host}`)) {
@@ -84,8 +87,15 @@ export function createApp(service: TutorService) {
 async function main() {
   const port = Number(process.env.PORT ?? 3000);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('PORT must be an integer between 0 and 65535.');
+  const tailnetIp = process.env.CODE_SWIPE_TAILSCALE_IP;
+  if (tailnetIp) {
+    const parts = tailnetIp.split('.').map(Number);
+    if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255) || parts[0] !== 100 || parts[1] < 64 || parts[1] > 127) {
+      throw new Error('CODE_SWIPE_TAILSCALE_IP must be a Tailscale IPv4 address.');
+    }
+  }
   const service = await TutorService.create(process.env.CODE_SWIPE_DATA_DIR || resolve('.code-swipe'));
-  const app = createApp(service);
+  const app = createApp(service, tailnetIp);
   let vite: Awaited<ReturnType<typeof import('vite')['createServer']>> | undefined;
   if (process.env.NODE_ENV === 'production') {
     const client = resolve('dist/client');
@@ -101,9 +111,14 @@ async function main() {
     if (address && typeof address !== 'string') console.log(`Code Swipe → http://127.0.0.1:${address.port}\nLocal history → ${service.store.directory}`);
   });
   server.on('error', error => { console.error(error.message); process.exitCode = 1; void vite?.close(); });
+  const tailnetServer = tailnetIp ? app.listen(port, tailnetIp, () => {
+    console.log(`Code Swipe on Tailscale → http://${tailnetIp}:${port}`);
+  }) : undefined;
+  tailnetServer?.on('error', error => { console.error(error.message); process.exitCode = 1; server.close(); void vite?.close(); });
   const shutdown = async () => {
     await service.close();
     server.close();
+    tailnetServer?.close();
     await vite?.close();
   };
   process.once('SIGINT', () => { void shutdown(); });

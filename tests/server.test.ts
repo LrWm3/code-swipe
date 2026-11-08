@@ -67,6 +67,23 @@ test('given a local API, when a website or rebound hostname calls it, then reque
   assert.equal((await fetch(base + '/api/state', { headers: { Origin: base } })).status, 200);
 });
 
+test('given a second trusted interface, when a phone uses its address, then only same-origin requests are accepted', async t => {
+  const address = '127.0.0.2';
+  const listener = createApp(service, address).listen(0, address);
+  await once(listener, 'listening');
+  t.after(() => new Promise<void>(resolve => listener.close(() => resolve())));
+  const socket = listener.address();
+  assert.ok(socket && typeof socket !== 'string');
+  const url = `http://${address}:${socket.port}/api/state`;
+  const status = (headers: Record<string, string> = {}) => new Promise<number>(resolve => {
+    request(url, { headers }, response => { response.resume(); resolve(response.statusCode!); }).end();
+  });
+  assert.equal(await status(), 200);
+  assert.equal(await status({ Origin: `http://${address}:${socket.port}` }), 200);
+  assert.equal(await status({ Origin: 'https://example.com' }), 403);
+  assert.equal(await status({ Host: `127.0.0.1:${socket.port}` }), 403);
+});
+
 test('given malformed requests, when parsed, then errors remain JSON and no state changes', async () => {
   const bad = await fetch(base + '/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{' });
   assert.equal(bad.status, 400);

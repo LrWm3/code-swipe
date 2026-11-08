@@ -2,6 +2,8 @@
 
 Code Swipe is a tool to practice your coding skills by swiping right or left to answer if the presented problem and solution are buggy or not.
 
+Code Swipe currently supports self-hosted use only.
+
 The swipe model means students can practice a few minutes a day while progressing through lessons. Unlike platforms which require typing out the solution, code-swipe makes learning in short chunks of time tractable.
 
 ![Original Code Swipe gameplay](docs/assets/code-swipe-gameplay.gif)
