@@ -18,11 +18,17 @@ test('given a new answer review, when displaying its card, then the source and p
   assert.equal(card.claim, 'Yes, both names refer to the same list.');
 });
 
-test('given the current lesson’s older Python trace format, when displaying it, then the original snippet becomes source and the diagram remains readable', () => {
-  const card = cardPresentation({ kind: 'answer-review', specification: 'Judge the final-state claim after this Python snippet.\n\nbasket = ["tea"]\nshopping = basket\n\nInitial diagram:\nbasket → list A ["tea"]\nshopping → list A\n\nshopping.append("rice")', code: '', contextId: 'python', proposedAnswer: 'basket now contains ["tea", "rice"].' });
-  assert.equal(card.description, 'Judge the final-state claim after this Python snippet.');
-  assert.match(card.support!, /basket → list A/);
+test('given the current lesson’s older Python trace format, when displaying it, then the card shows a plain setup, source, and claim without a redundant diagram', () => {
+  const card = cardPresentation({ id: '121fc23c-6035-4c0c-8af8-3d143d57cfee', kind: 'answer-review', specification: 'Judge the final-state claim after this Python snippet.\n\nbasket = ["tea"]\nshopping = basket\n\nInitial diagram:\nbasket → list A ["tea"]\nshopping → list A\n\nshopping.append("rice")', code: '', contextId: 'python', proposedAnswer: 'basket now contains ["tea", "rice"].' });
+  assert.equal(card.description, 'A basket starts with tea. The snippet adds rice through another name.');
   assert.equal(card.source, 'basket = ["tea"]\nshopping = basket\nshopping.append("rice")');
   assert.equal(card.sourceLanguage, 'python');
-  assert.equal(card.claim, 'basket now contains ["tea", "rice"].');
+  assert.equal(card.question, 'After running, basket contains ["tea", "rice"].');
+  assert.equal(card.claim, undefined);
+});
+
+test('given a generated answer review with a complete claim as its question, when displaying it, then the claim appears once', () => {
+  const card = cardPresentation({ kind: 'answer-review', specification: 'A basket starts with tea.', source: 'basket = ["tea"]', code: '', contextId: 'python', questionText: 'basket contains ["tea"].', proposedAnswer: 'basket contains ["tea"].' });
+  assert.equal(card.question, 'basket contains ["tea"].');
+  assert.equal(card.claim, undefined);
 });

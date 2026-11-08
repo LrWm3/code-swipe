@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, Code2, Download, Flag, FlaskConical, HelpCircle, LoaderCircle, Settings2, ShieldCheck, Sparkles, Terminal, X } from 'lucide-react';
+import { ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, Code2, Download, Flag, FlaskConical, HelpCircle, Layers3, LoaderCircle, Settings2, ShieldCheck, Sparkles, Terminal, X } from 'lucide-react';
 import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
 import python from 'highlight.js/lib/languages/python';
@@ -149,7 +149,7 @@ function ReviewPanel({ review, pending, onFlag, onGuide }: { review: Review; pen
         <details className="plain-details"><summary>Original reference implementation</summary><Code code={review.originalPresentation.referenceCode} /></details>
       </details>
     </div>}
-    <details className="plain-details code-details"><summary>Revisit the description, source, and question</summary><p>{card.description}</p>{card.support && <p>Initial diagram:<br /><span className="preserve-lines">{card.support}</span></p>}{card.source && <Code code={card.source} language={card.sourceLanguage} label="Source" />}<p><strong>Question:</strong> {card.question}</p>{card.claim && <blockquote>{card.claim}</blockquote>}</details>
+    <details className="plain-details code-details"><summary>Revisit the description, source, and question</summary><p>{card.description}</p>{card.source && <Code code={card.source} language={card.sourceLanguage} label="Source" />}<p><strong>Question:</strong> {card.question}</p>{card.claim && <blockquote>{card.claim}</blockquote>}</details>
     <details className="plain-details code-details"><summary>{isAnswer ? 'Reference answer' : 'Reference implementation'}</summary><Code code={isAnswer ? question.referenceAnswer! : question.referenceCode} language={isAnswer ? null : review.language} /></details>
     <div className="prediction-box">
       <div className="eyebrow"><ShieldCheck size={15} /> Committed before your answer</div>
@@ -425,10 +425,30 @@ function SettingsPanel({ state, settings, setSettings, onSave, pending }: { stat
   </form><aside className="settings-aside"><section className="panel"><div className="eyebrow"><Terminal size={15} /> One tutor. A continuing plan.</div><h2>Develop understanding over several lessons.</h2><p>Choose a learning direction, then work through a flexible curriculum. Your tutor reviews progress before preparing each next lesson.</p><p>Review explanations whenever useful. Isolated mistakes stay in your record; recurring patterns may prompt extra support. When a curriculum finishes, choose from three new directions.</p><p className="fine-print">Practice demo uses fixed exercises and scripted predictions. It is a quick way to try the flow.</p></section><section className="panel"><div className="eyebrow"><ShieldCheck size={15} /> Saved on this computer</div><h2>Your notebook travels with you.</h2><p>Lessons and answers are stored by your local server. Export a copy for your own records.</p><a href="/api/export" download className="button quiet"><Download size={17} /> Export record</a><details className="plain-details"><summary>Backup location</summary><p className="fine-print">Back up this directory to preserve your local record.</p><code className="data-path">{state.dataDirectory}</code></details></section></aside></div></div>;
 }
 
+function LessonsHome({ state, pending, onResumeMain, onResumePractice, onNotebook }: {
+  state: AppState; pending: boolean; onResumeMain: () => void; onResumePractice: () => void; onNotebook: () => void;
+}) {
+  const main = state.lessons.find(item => item.id === state.learning?.mainLessonId && !item.complete)
+    ?? (!state.currentLesson?.generalPractice && !state.currentLesson?.focus && !state.currentLesson?.complete ? state.currentLesson : null);
+  const practice = state.lessons.find(item => item.id === state.learning?.practiceLessonId && item.generalPractice && !item.complete);
+  const activeId = state.currentLesson?.id;
+  const entry = (lesson: LessonSummary, label: string, onResume: () => void) => <section className="panel lesson-home-card" key={lesson.id}>
+    <div className="section-heading"><span className="eyebrow">{label}</span>{activeId === lesson.id && <Badge tone="green">Open now</Badge>}</div>
+    <h2>{lesson.objective}</h2>
+    <p className="muted">{lesson.answered} of {lesson.total} cards answered · {(lesson.contextIds ?? [lesson.language ?? 'javascript']).map(id => contextLabel(id, state.contexts)).join(' + ')}</p>
+    <button className="button primary" disabled={pending} onClick={onResume}>{activeId === lesson.id ? 'Continue' : 'Resume'}<ArrowRight size={16} /></button>
+  </section>;
+  return <div className="lessons-home"><div className="page-intro"><div><div className="eyebrow">Your learning</div><h1>Lessons</h1><p className="muted">Pick up where you left off or start a general practice session.</p></div></div>
+    <div className="lessons-home-list">{main && entry(main, 'Curriculum lesson', onResumeMain)}{practice && entry(practice, 'General practice', onResumePractice)}{!main && !practice && <section className="panel"><h2>No lessons in progress</h2><p className="muted">Open Practice to choose a direction or start your next lesson.</p><button className="button quiet" onClick={onResumeMain}>Open Practice<ArrowRight size={16} /></button></section>}</div>
+    <section className="panel lessons-home-start"><div><h2>General practice</h2><p className="muted">Mix familiar material with adjacent ideas in a separate session.</p></div><button className="button quiet" disabled={pending || (!practice && (!state.providers.find(item => item.id === state.settings.provider)?.available || state.settings.provider === 'demo' || state.settings.tutorMode !== 'reflective'))} onClick={onResumePractice}>{practice ? 'Resume general practice' : 'Start general practice'}<ArrowRight size={16} /></button></section>
+    <button className="text-button" onClick={onNotebook}>Review completed lessons in Notebook<ChevronRight size={14} /></button>
+  </div>;
+}
+
 export default function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [settings, setSettings] = useState<Settings>(defaults);
-  const [view, setView] = useState<'practice' | 'notebook' | 'settings'>('practice');
+  const [view, setView] = useState<'practice' | 'lessons' | 'notebook' | 'settings'>('practice');
   const [pending, setPending] = useState('');
   const [error, setError] = useState('');
   const [connectionError, setConnectionError] = useState('');
@@ -622,6 +642,7 @@ export default function App() {
     if (draft) await saveCompletion(draft);
     acceptState(await api<AppState>('/api/practice/return', 'POST'));
     setReviewId(null);
+    setView('practice');
   });
   const submit = useCallback(async (answer: Answer) => {
     if (!state?.question || reviewId || guideConcept || state.lessonPreview?.length || running || view !== 'practice' || busy.current || connectionError) return;
@@ -685,29 +706,26 @@ export default function App() {
   const proposeDirections = (steering: string) => void mutate('directions', async () => acceptState(await api<AppState>('/api/learning/directions', 'POST', { steering })));
   const lesson = state?.currentLesson || null;
   const card = state?.question ? cardPresentation(state.question, state.contexts) : null;
-  const generalPractice = state?.lessons.find(item => item.id === state.learning?.practiceLessonId && item.generalPractice);
-  const resumableGeneralPractice = Boolean(generalPractice && !generalPractice.complete);
-  const canStartGeneralPractice = Boolean(journeyEnabled && chosenProvider?.available);
   const lessonNumber = lesson && state ? arc?.lessons.some(item => item.lessonId === lesson.id) ? arc.lessons.findIndex(item => item.lessonId === lesson.id) + 1 : state.lessons.length - state.lessons.findIndex(item => item.id === lesson.id) : 0;
   const changeView = (next: typeof view) => { setReviewId(null); setView(next); };
   const answerDisabled = Boolean(pending) || Boolean(connectionError) || Boolean(reviewId) || Boolean(guideConcept) || Boolean(running);
   const previousAnswer = lastReview && !running ? <PreviousAnswer review={lastReview} disabled={Boolean(pending)} onReview={() => setReviewId(lastReview.attempt.id)} /> : null;
 
   return <div className={`app-shell view-${view}${view === 'practice' && state?.question ? ' has-active-card' : ''}`}>
-    <header className="app-header"><button className="brand" onClick={() => changeView('practice')} aria-label="Code Swipe home"><span className="brand-mark"><Code2 size={24} /></span><span>code<span className="brand-light">swipe</span></span></button><nav aria-label="Main navigation">{([{ id: 'practice', label: 'Practice', icon: Code2 }, { id: 'notebook', label: 'Notebook', icon: BookOpen }, { id: 'settings', label: 'Setup', icon: Settings2 }] as const).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => changeView(id)} className={view === id ? 'active' : ''} aria-current={view === id ? 'page' : undefined}><Icon size={17} /><span>{label}</span></button>)}</nav><span className="local-status"><span className={`status-dot ${connectionError ? 'offline' : ''}`} />{connectionError ? 'Disconnected' : pending ? 'Saving…' : state ? 'Saved locally' : 'Connecting…'}</span></header>
+    <header className="app-header"><button className="brand" onClick={() => changeView('practice')} aria-label="Code Swipe home"><span className="brand-mark"><Code2 size={24} /></span><span>code<span className="brand-light">swipe</span></span></button><nav aria-label="Main navigation">{([{ id: 'practice', label: 'Practice', icon: Code2 }, { id: 'lessons', label: 'Lessons', icon: Layers3 }, { id: 'notebook', label: 'Notebook', icon: BookOpen }, { id: 'settings', label: 'Setup', icon: Settings2 }] as const).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => changeView(id)} className={view === id ? 'active' : ''} aria-current={view === id ? 'page' : undefined}><Icon size={17} /><span>{label}</span></button>)}</nav><span className="local-status"><span className={`status-dot ${connectionError ? 'offline' : ''}`} />{connectionError ? 'Disconnected' : pending ? 'Saving…' : state ? 'Saved locally' : 'Connecting…'}</span></header>
     <main id="main-content">
       {(error || connectionError) && <div className="error-notice" role="alert"><div><strong>{connectionError ? 'Local server disconnected' : 'Couldn’t finish that action'}</strong><p>{connectionError || error}</p></div><button className="button compact quiet" onClick={() => { setError(''); void refresh(); void flushReviewSessions(); }} disabled={Boolean(pending)}>Reconnect</button></div>}
       {!state ? <div className="panel loading-state"><Terminal size={34} /><h1>{connectionError ? 'Reconnect to continue' : 'Opening your notebook…'}</h1><p className="muted">{connectionError ? 'Start the Code Swipe server, then reconnect.' : 'Loading your saved lessons.'}</p><button className="button quiet" onClick={() => void refresh()}>Retry connection</button></div>
         : view === 'settings' ? <SettingsPanel state={state} settings={settings} setSettings={setSettings} pending={Boolean(pending) || running} onSave={() => void mutate('settings', async () => acceptState(await api<AppState>('/api/settings', 'PUT', settings)))} />
         : view === 'notebook' ? <Notebook state={state} selectedId={selectedLessonId} onSelect={setSelectedLessonId} onReview={setReviewId} onPractice={() => changeView('practice')} onGuide={openGuide} pending={Boolean(pending) || running} onUndo={id => void mutate('undo-merge', async () => acceptState(await api<AppState>(`/api/knowledge/merges/${encodeURIComponent(id)}/undo`, 'POST')))} />
+        : view === 'lessons' ? <LessonsHome state={state} pending={Boolean(pending) || Boolean(connectionError) || running} onResumeMain={() => state.currentLesson?.generalPractice ? returnFromGeneralPractice() : changeView('practice')} onResumePractice={startGeneralPractice} onNotebook={() => changeView('notebook')} />
         : <div className="practice-layout"><div className="practice-main">
-          {(canStartGeneralPractice || resumableGeneralPractice || lesson?.generalPractice) && !running && !lesson?.focus && (!lesson?.complete || !lesson.generalPractice) && <div className="general-practice-switch"><button className="text-button" disabled={Boolean(pending) || Boolean(connectionError) || (!lesson?.generalPractice && !resumableGeneralPractice && !canStartGeneralPractice)} onClick={lesson?.generalPractice ? () => returnFromGeneralPractice() : startGeneralPractice} data-testid="general-practice-switch">{lesson?.generalPractice ? state.learning?.mainLessonId ? 'Back to lesson' : arc ? 'Back to curriculum' : 'Back to directions' : resumableGeneralPractice ? 'Resume general practice' : 'Start general practice'}</button></div>}
           {state.lessonPreview?.length && lesson && !running ? <section className="panel lesson-preview" data-testid="lesson-preview"><div className="eyebrow">Before you begin · optional</div><h1>Ideas for this lesson</h1><p className="muted">Explore the concepts, techniques, and representations behind this lesson. Open a guide, try focused practice, or start right away.</p><div className="preview-concepts">{state.lessonPreview.map(concept => <button className="button quiet" key={`${concept.id}:${concept.contextId}`} onClick={() => openGuide(concept)} data-testid="preview-concept"><BookOpen size={17} /><span>{concept.name}{concept.kind && <small className="preview-kind">{KIND_LABELS[concept.kind]}</small>}</span><ChevronRight size={15} /></button>)}</div><button className="button primary" data-testid="begin-prepared-lesson" disabled={Boolean(pending)} onClick={() => void mutate('begin', async () => acceptState(await api<AppState>(`/api/lessons/${encodeURIComponent(lesson.id)}/start`, 'POST')))}>Start lesson<ArrowRight size={17} /></button></section>
           : state.question && lesson && !running ? <>
             <div className="lesson-progress"><div><span className="eyebrow">{lesson.focus ? 'Focused practice' : lesson.generalPractice ? 'General practice' : `Lesson ${lessonNumber}`}</span><span className="muted">Card {lesson.answered + 1} of {lesson.total}</span></div><div className="progress-track" role="progressbar" aria-label="Lesson progress" aria-valuemin={0} aria-valuemax={lesson.total} aria-valuenow={lesson.answered} data-testid="lesson-progress"><span style={{ width: `${lesson.answered / lesson.total * 100}%` }} /></div>{lesson.focus && <button className="text-button focus-exit" disabled={Boolean(pending)} onClick={() => void mutate('resume', async () => acceptState(await api<AppState>('/api/lessons/resume', 'POST')))}>Leave practice and return to lesson<ChevronRight size={14} /></button>}</div>
             <div className="card-stack"><div className="card-stack-back" aria-hidden="true" /><article className={`exercise-card structured-card ${dragging ? 'dragging' : ''}`} data-testid="exercise-card" data-question-id={state.question.id} style={{ transform: `translateX(${drag}px) rotate(${drag * .055}deg)` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag} aria-busy={pending === 'answer'}>
               {drag > 25 && <div className="swipe-stamp correct" data-testid="swipe-correct-overlay">CORRECT</div>}{drag < -25 && <div className="swipe-stamp buggy" data-testid="swipe-buggy-overlay">{state.question.kind === 'answer-review' ? 'INCORRECT' : 'BUGGY'}</div>}
-              <div className="exercise-intro"><div className="section-heading"><span className="small-label">Description</span><Badge>{state.question.contextName ?? LANGUAGE_NAMES[state.question.language ?? 'javascript']}</Badge></div><h1 ref={heading} tabIndex={-1}>{state.question.title}</h1><div className="specification"><p>{card!.description}</p></div>{card!.support && <details className="card-support"><summary>Initial diagram</summary><pre>{card!.support}</pre></details>}</div>
+              <div className="exercise-intro"><div className="section-heading"><span className="small-label">Description</span><Badge>{state.question.contextName ?? LANGUAGE_NAMES[state.question.language ?? 'javascript']}</Badge></div><h1 ref={heading} tabIndex={-1}>{card!.description}</h1></div>
               {card!.source && <><div className="card-part-label">Source</div><Code code={card!.source} language={card!.sourceLanguage} label="Source" /></>}
               <div className="card-question"><span className="small-label">Question</span><p>{card!.question}</p>{card!.claim && <blockquote>{card!.claim}</blockquote>}</div><div className="card-footnote"><span>↔ Drag to decide</span><span>{state.question.kind === 'answer-review' ? 'Incorrect' : 'Buggy'} ← → Correct</span></div>
             </article></div>
