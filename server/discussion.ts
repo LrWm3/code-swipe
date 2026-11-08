@@ -1,4 +1,5 @@
 import type { DiscussionContext, ProposedDiscussion } from '../src/types.ts';
+import { lessonContextLanguage } from '../src/learning-contexts.ts';
 import { teachingPolicy, sustainedPatterns } from './learning-journey.ts';
 
 export const discussionOutputSchema = {
@@ -30,14 +31,15 @@ function recentWithinBudget<T>(values: T[], count: number, maxBytes: number): T[
 export function buildDiscussionPrompt(context: DiscussionContext): string {
   const history = context.tutor.history.filter(entry => entry.lesson.id !== context.lesson.id).map(({ lesson, attempts }) => {
     const evidence = attempts.filter(attempt => !attempt.flagged);
+    const language = lessonContextLanguage(lesson, context.tutor.knowledge?.contexts);
     return {
       lesson: {
-        id: lesson.id, createdAt: lesson.createdAt, language: lesson.language ?? 'javascript', objective: lesson.objective,
+        id: lesson.id, createdAt: lesson.createdAt, language, objective: lesson.objective,
         reflection: lesson.reflection, hypotheses: lesson.hypotheses,
         questions: lesson.questions.filter(question => evidence.some(attempt => attempt.exerciseId === question.id)).map(question => ({
           id: question.id, title: question.title, specification: question.specification,
           code: question.code, verdict: question.verdict, explanation: question.explanation,
-          kind: question.kind, contextId: question.contextId, language: question.language ?? lesson.language, proposedAnswer: question.proposedAnswer, referenceAnswer: question.referenceAnswer, verification: question.validation.verification,
+          kind: question.kind, contextId: question.contextId, language: question.kind === 'answer-review' ? undefined : question.language ?? language, proposedAnswer: question.proposedAnswer, referenceAnswer: question.referenceAnswer, verification: question.validation.verification,
           prediction: question.prediction,
         })),
       },
@@ -52,7 +54,7 @@ export function buildDiscussionPrompt(context: DiscussionContext): string {
     retrospectiveSkillReviews: context.tutor.skillRetrofits ?? [],
     guideEvents: recentWithinBudget(context.tutor.guideEvents ?? [], 120, 32 * 1024),
     focusHistory: recentWithinBudget(context.tutor.focusHistory ?? [], 12, 16 * 1024),
-    lesson: context.lesson,
+    lesson: { ...context.lesson, language: lessonContextLanguage(context.lesson, context.tutor.knowledge?.contexts) },
     attempts: context.attempts.filter(attempt => !attempt.flagged),
     feedback: context.feedback,
     discussions: recentWithinBudget(context.discussions, 12, 64 * 1024),

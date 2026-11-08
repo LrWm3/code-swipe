@@ -1,14 +1,15 @@
 import type { TutorContext } from '../src/types.ts';
-import { BASE_CONTEXTS } from '../src/learning-contexts.ts';
+import { BASE_CONTEXTS, lessonContextLanguage } from '../src/learning-contexts.ts';
 import { selectPlanningKnowledge } from './planning-knowledge.ts';
 import { sustainedPatterns, teachingPolicy } from './learning-journey.ts';
 
 /** Personal evidence is selected independently of the executable environment. */
 export function buildKnowledgeTutorPrompt(context: TutorContext, schema: unknown, now: Date): string {
   const baseline = context.settings.tutorMode === 'baseline';
+  const { language: _legacyLanguage, ...learningSettings } = context.settings;
   const { graph, memory, conceptIndex } = baseline ? { graph: { concepts: [], contexts: BASE_CONTEXTS, relationships: [], aliases: {}, history: [] }, memory: [], conceptIndex: [] } : selectPlanningKnowledge(context);
   const evidence = baseline ? {} : {
-    history: context.history.map(({ lesson, attempts }) => ({ lesson: { ...lesson, questions: lesson.questions.filter(question => attempts.some(attempt => attempt.exerciseId === question.id)) }, attempts })),
+    history: context.history.map(({ lesson, attempts }) => ({ lesson: { ...lesson, language: lessonContextLanguage(lesson, context.knowledge?.contexts), questions: lesson.questions.filter(question => attempts.some(attempt => attempt.exerciseId === question.id)) }, attempts })),
     hypotheses: context.hypotheses, curriculumMemory: memory,
     variants: context.curriculum?.variants ?? [], metrics: context.metrics, feedback: context.feedback ?? [], discussions: context.discussions ?? [],
     guideEvents: context.guideEvents ?? [], focusHistory: context.focusHistory ?? [], reviewSessions: context.reviewSessions ?? [],
@@ -47,6 +48,6 @@ Retain stable familyId for the same underlying task and concept set. Normally as
 ${context.focus ? `FOCUSED PRACTICE: Every card targets ${context.focus.concept.id} in ${context.focus.contextId ?? context.focus.concept.contextId}. Use only that context. Four-card practice should usually use warmup, build, build, consolidate with demands 1,2,2,2. Stretch is optional. The main lesson is paused. Avoid these unseen tasks: ${JSON.stringify(context.focus.avoidQuestions?.map(item => ({ title: item.title, specification: item.specification })) ?? [])}.` : ''}
 Keep notes concise, usually one sentence per rationale. Commit all predictions and intentions before answers; feedback influences future lessons, never rewrites this batch. Current supplied records supersede session memory. Earlier drafts, cancelled lessons and unasked variants are not evidence. Previous curricula include goals and suggested later checks: revisit them only when useful and suitably delayed, without making every lesson a review batch.
 ${context.repair?.length ? `REPAIR: Fix every supplied current failure. Earlier checks may already be fixed. Never bypass verification or alter historical evidence. Failures: ${JSON.stringify(context.repair)}\nDRAFT: ${JSON.stringify(context.draft)}` : ''}
-CONTEXT\n${JSON.stringify({ currentTime: now.toISOString(), settings: context.settings, knowledgeGraph: graph, existingConceptIndex: conceptIndex, environments: context.environments, ...evidence })}
+CONTEXT\n${JSON.stringify({ currentTime: now.toISOString(), settings: learningSettings, knowledgeGraph: graph, existingConceptIndex: conceptIndex, environments: context.environments, ...evidence })}
 OUTPUT_SCHEMA\n${JSON.stringify(schema)}`;
 }

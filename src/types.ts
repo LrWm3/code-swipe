@@ -199,7 +199,7 @@ export interface CurriculumMemory {
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 export interface Settings {
-  // Missing only in notebooks created before language selection.
+  // Legacy/demo execution default; preferredContexts controls tutor preferences.
   language?: Language;
   preferredContexts?: string[];
   excludedContexts?: string[];

@@ -12,7 +12,7 @@ import { validateLesson } from '../server/validation.ts';
 import { migrateKnowledge } from '../server/knowledge-migration.ts';
 import { buildTutorPrompt, parseLessonOutput } from '../server/prompts.ts';
 import { parseContextGuide } from '../server/concept-guides.ts';
-import { BASE_CONTEXTS } from '../src/learning-contexts.ts';
+import { BASE_CONTEXTS, lessonContextLanguage } from '../src/learning-contexts.ts';
 import type { KnowledgePlan, Lesson, ProposedLesson, StoreData, TutorContext } from '../src/types.ts';
 
 export function tutorContext(): TutorContext {
@@ -77,6 +77,22 @@ test('given a mixed-context lesson, when validating and answering, then executio
   assert.equal(buildCurriculumMemory(store.snapshot()).concepts[0].contextPractice!.numpy.supporting, 2);
   assert.equal(store.publicState([], null).metrics.count, 5);
   assert.equal(readFileSync(join(directory, 'plans', `${lesson.id}.json`), 'utf8'), planBytes);
+});
+
+test('given no preferred contexts and an old Rust demo language, when preparing a contextual lesson, then its actual context determines its language', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'code-swipe-context-language-')); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const store = new LocalStore(directory);
+  store.saveSettings({ ...store.snapshot().settings, language: 'rust', preferredContexts: [], batchSize: 6 });
+  const context = { ...store.context(), environments: tutorContext().environments };
+  const promptContext = JSON.parse(buildTutorPrompt(context).split('\nCONTEXT\n').at(-1)!.split('\nOUTPUT_SCHEMA')[0]);
+  assert.deepEqual(promptContext.settings.preferredContexts, []);
+  assert.equal(Object.hasOwn(promptContext.settings, 'language'), false);
+  const proposal = generalLesson({ ...context, settings: { ...context.settings, language: 'javascript' } });
+  const lesson = store.commitLesson(await validateLesson(proposal, context), context.settings);
+  assert.equal(lesson.language, 'javascript');
+  assert.equal(store.publicState([], null).currentLesson?.language, 'javascript');
+  assert.equal(lessonContextLanguage({ language: 'rust', contextIds: ['python'] }), 'python');
+  assert.equal(lessonContextLanguage({ language: 'rust', contextIds: ['networking'] }), undefined);
 });
 
 test('given supported code, when it fails verification or is relabeled unverified, then it cannot bypass execution checks', async () => {

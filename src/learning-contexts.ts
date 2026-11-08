@@ -11,6 +11,10 @@ export const BASE_CONTEXTS: LearningContext[] = [
   { id: 'networking', name: 'Networking', description: 'Protocols, addressing, and network behavior.', parentIds: [], language: null },
 ];
 export function isLanguage(value: unknown): value is Language { return ['javascript', 'python', 'rust'].includes(value as string); }
+export function lessonContextLanguage(lesson: Pick<Lesson, 'language' | 'contextIds'>, contexts: LearningContext[] = BASE_CONTEXTS): Language | undefined {
+  const context = contexts.find(item => item.id === lesson.contextIds?.[0]);
+  return context ? context.language ?? undefined : lesson.language;
+}
 export function questionContext(question: ProposedQuestion, lesson?: Pick<Lesson, 'language'>): string {
   return question.contextId ?? question.language ?? lesson?.language ?? 'javascript';
 }

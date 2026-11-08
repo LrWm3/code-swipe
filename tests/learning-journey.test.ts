@@ -45,6 +45,15 @@ function reviewFor(context: TutorContext, complete = false): ArcReview {
     remainingLessons: complete ? [] : [plan.lessons[1]], investigations: [], retention: 'Check again after a delay in a future curriculum.' };
 }
 
+test('given no preferred contexts, when suggesting directions, then a legacy demo language is not presented as a preference', t => {
+  const store = storeFor(t);
+  store.saveSettings({ ...store.snapshot().settings, language: 'rust', preferredContexts: [] });
+  const prompt = learningTaskPrompt({ kind: 'directions' }, store.context(), store.snapshot().learning!).prompt;
+  const promptContext = JSON.parse(prompt.split('\nCONTEXT\n').at(-1)!.split('\nOUTPUT_SCHEMA')[0]);
+  assert.deepEqual(promptContext.settings.preferredContexts, []);
+  assert.equal(Object.hasOwn(promptContext.settings, 'language'), false);
+});
+
 test('given archived lessons and an unanswered current lesson, when migrating and restarting, then legacy evidence and sealed bytes survive while the current lesson is cancelled', async t => {
   let store = storeFor(t);
   const earlier = await addLesson(store);

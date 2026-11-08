@@ -502,7 +502,7 @@ export default function App() {
   }, [refresh]);
   useEffect(() => {
     if (state) setSettings(state.settings);
-  }, [state?.settings.provider, state?.settings.model, state?.settings.interests, state?.settings.batchSize, state?.settings.tutorMode, state?.settings.language]);
+  }, [state?.settings.provider, state?.settings.model, state?.settings.interests, state?.settings.batchSize, state?.settings.tutorMode, state?.settings.language, state?.settings.preferredContexts?.join(','), state?.settings.excludedContexts?.join(',')]);
   useEffect(() => {
     if (!running && !connectionError) return;
     const controller = new AbortController();

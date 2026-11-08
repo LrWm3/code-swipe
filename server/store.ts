@@ -9,7 +9,7 @@ import { buildCurriculumMemory } from './curriculum-memory.ts';
 import { validateRetrofit } from './skill-evidence.ts';
 import { presentationArchiveHash, revisedQuestion, validatePresentationRevision, verifyPresentationBehavior } from './presentation-revisions.ts';
 import type { ConceptGuide, GuideConcept, GuideEvent, Language, PresentationRevision, SkillRetrofit } from '../src/types.ts';
-import { BASE_CONTEXTS, guideContext, questionContext, questionLanguage } from '../src/learning-contexts.ts';
+import { BASE_CONTEXTS, guideContext, lessonContextLanguage, questionContext, questionLanguage } from '../src/learning-contexts.ts';
 import { buildKnowledgeGraph, canonicalId, validId } from './knowledge-graph.ts';
 import { migrateKnowledge } from './knowledge-migration.ts';
 import { executionEnvironments } from './environments.ts';
@@ -367,10 +367,14 @@ export class LocalStore {
     const step = arc ? remainingSteps(arc)[0] : undefined;
     if (arc && !step) throw new AppError('Review the curriculum before preparing another lesson.', 409);
     proposal = structuredClone(proposal);
+    const contextIds = proposal.curriculum?.knowledge ? [...new Set(proposal.questions.map(question => question.contextId!))] : undefined;
+    const lessonLanguage = contextIds
+      ? lessonContextLanguage({ contextIds }, [...buildKnowledgeGraph(this.data).contexts, ...proposal.curriculum!.knowledge!.contexts])
+      : proposal.questions.find(question => question.language)?.language ?? settings.language ?? 'javascript';
     const lesson: Lesson = {
       id: randomUUID(), createdAt: new Date().toISOString(), provider: settings.provider, model: settings.model,
-      tutorMode: settings.tutorMode, interests: settings.interests, language: proposal.questions.find(question => question.language)?.language ?? settings.language ?? 'javascript',
-      ...(proposal.curriculum?.knowledge ? { contextIds: [...new Set(proposal.questions.map(question => question.contextId!))] } : {}),
+      tutorMode: settings.tutorMode, interests: settings.interests, ...(lessonLanguage ? { language: lessonLanguage } : {}),
+      ...(contextIds ? { contextIds } : {}),
       ...(focus ? { focus } : {}),
       ...(generalPractice ? { generalPractice: true } : {}),
       objective: proposal.objective, rationale: proposal.rationale, assumptions: proposal.assumptions,
@@ -591,11 +595,12 @@ export class LocalStore {
   }
 
   publicState(providers: ProviderStatus[], job: Job | null, languages?: AppState['languages']): AppState {
+    const graph = buildKnowledgeGraph(this.data);
     const summaries: LessonSummary[] = this.data.lessons.map(lesson => {
       const answered = this.data.attempts.filter(item => item.lessonId === lesson.id).length;
       const complete = answered === lesson.questions.length;
       return { id: lesson.id, objective: lesson.objective, rationale: complete ? lesson.rationale : 'The tutor’s rationale is sealed until this lesson is complete, so it cannot give away the answers.', createdAt: lesson.createdAt,
-        provider: lesson.provider, tutorMode: lesson.tutorMode, language: lesson.language ?? 'javascript', contextIds: lesson.contextIds ?? [lesson.language ?? 'javascript'], answered, total: lesson.questions.length, complete,
+        provider: lesson.provider, tutorMode: lesson.tutorMode, language: lessonContextLanguage(lesson, graph.contexts), contextIds: lesson.contextIds ?? [lesson.language ?? 'javascript'], answered, total: lesson.questions.length, complete,
         reflection: complete ? lesson.reflection : null, assumptions: complete ? lesson.assumptions : [],
         hypotheses: complete ? lesson.hypotheses : [], predictionHash: lesson.predictionHash,
         ...(complete && lesson.curriculum ? { curriculum: lesson.curriculum } : {}),
@@ -603,7 +608,6 @@ export class LocalStore {
         ...((this.data.endedFocusIds ?? []).includes(lesson.id) ? { endedEarly: true } : {}) };
     });
     const current = this.pendingQuestion();
-    const graph = buildKnowledgeGraph(this.data);
     const completedIds = new Set(summaries.filter(item => item.complete).map(item => item.id));
     const publicData = { ...this.data, settings: { ...this.data.settings, tutorMode: 'reflective' as const }, lessons: this.data.lessons.map(lesson => {
       if (completedIds.has(lesson.id)) return lesson;
